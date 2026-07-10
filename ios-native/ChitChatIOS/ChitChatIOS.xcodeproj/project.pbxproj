@@ -52,6 +52,8 @@
 		F60000000000000000000003 /* VoiceCallService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F60000000000000000000023 /* VoiceCallService.swift */; };
 		F60000000000000000000004 /* VoiceCallViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = F60000000000000000000024 /* VoiceCallViewController.swift */; };
 		F60000000000000000000005 /* WebRTC in Frameworks */ = {isa = PBXBuildFile; productRef = F60000000000000000000031 /* WebRTC */; };
+		F70000000000000000000001 /* NativeCallConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = F70000000000000000000021 /* NativeCallConfig.swift */; };
+		F70000000000000000000002 /* VoiceCallDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = F70000000000000000000022 /* VoiceCallDiagnostics.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -100,6 +102,8 @@
 		F60000000000000000000022 /* CallAudioSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallAudioSession.swift; sourceTree = "<group>"; };
 		F60000000000000000000023 /* VoiceCallService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceCallService.swift; sourceTree = "<group>"; };
 		F60000000000000000000024 /* VoiceCallViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceCallViewController.swift; sourceTree = "<group>"; };
+		F70000000000000000000021 /* NativeCallConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeCallConfig.swift; sourceTree = "<group>"; };
+		F70000000000000000000022 /* VoiceCallDiagnostics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceCallDiagnostics.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -179,6 +183,8 @@
 				B20000000000000000000026 /* MessageService.swift */,
 				D40000000000000000000021 /* SocketService.swift */,
 				E50000000000000000000021 /* UploadService.swift */,
+				F70000000000000000000021 /* NativeCallConfig.swift */,
+				F70000000000000000000022 /* VoiceCallDiagnostics.swift */,
 				F60000000000000000000022 /* CallAudioSession.swift */,
 				F60000000000000000000023 /* VoiceCallService.swift */,
 			);
@@ -341,6 +347,8 @@
 				F60000000000000000000002 /* CallAudioSession.swift in Sources */,
 				F60000000000000000000003 /* VoiceCallService.swift in Sources */,
 				F60000000000000000000004 /* VoiceCallViewController.swift in Sources */,
+				F70000000000000000000001 /* NativeCallConfig.swift in Sources */,
+				F70000000000000000000002 /* VoiceCallDiagnostics.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

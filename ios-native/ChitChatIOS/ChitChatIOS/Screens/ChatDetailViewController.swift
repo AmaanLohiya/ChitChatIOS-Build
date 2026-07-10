@@ -1216,17 +1216,22 @@ final class ChatDetailViewController: BaseViewController {
     }
 
     @objc private func startVoiceCall() {
-        #if DEBUG
-        print("[native-call] chat detail phone tapped chatId=\(chat.id) type=\(chat.type.rawValue)")
-        #endif
+        VoiceCallDiagnostics.record(.tapReceived)
+        guard NativeCallConfig.voiceCallsEnabled else {
+            showAlert(message: "Voice calls are temporarily unavailable.")
+            return
+        }
         guard chat.type == .direct else {
             showAlert(message: "Voice calls are available only in direct chats.")
             return
         }
+        VoiceCallDiagnostics.record(.chatValidated)
         guard chat.otherParticipant(viewerUserId: currentUser.id) != nil else {
             showAlert(message: "Voice calls are available only in direct chats.")
             return
         }
+        VoiceCallDiagnostics.record(.calleeResolved)
+        VoiceCallDiagnostics.record(.sessionChecked)
         VoiceCallService.shared.startOutgoingVoiceCall(
             chat: chat,
             currentUser: currentUser,

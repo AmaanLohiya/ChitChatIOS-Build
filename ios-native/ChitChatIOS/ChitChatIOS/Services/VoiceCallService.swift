@@ -10,6 +10,7 @@ private enum VoiceCallServiceError: LocalizedError {
     case invalidSignal
     case unsupportedVideo
     case microphonePermissionDenied
+    case engineUnavailable
 
     var errorDescription: String? {
         switch self {
@@ -27,6 +28,29 @@ private enum VoiceCallServiceError: LocalizedError {
             return "Video calls are coming later."
         case .microphonePermissionDenied:
             return "Microphone permission is required for voice calls."
+        case .engineUnavailable:
+            return "Voice engine unavailable."
+        }
+    }
+
+    var diagnosticName: String {
+        switch self {
+        case .groupCallsUnsupported:
+            return "groupCallsUnsupported"
+        case .missingParticipant:
+            return "missingParticipant"
+        case .alreadyInCall:
+            return "alreadyInCall"
+        case .socketUnavailable:
+            return "socketUnavailable"
+        case .invalidSignal:
+            return "invalidSignal"
+        case .unsupportedVideo:
+            return "unsupportedVideo"
+        case .microphonePermissionDenied:
+            return "microphonePermissionDenied"
+        case .engineUnavailable:
+            return "engineUnavailable"
         }
     }
 }
@@ -36,7 +60,7 @@ final class VoiceCallService: NSObject {
 
     private let chatService = ChatService()
     private let audioSession = CallAudioSession.shared
-    private let factory: RTCPeerConnectionFactory
+    private var factory: RTCPeerConnectionFactory?
     private var observers: [NSObjectProtocol] = []
 
     private var currentUser: User?
@@ -57,11 +81,6 @@ final class VoiceCallService: NSObject {
     private weak var callViewController: VoiceCallViewController?
 
     private override init() {
-        RTCInitializeSSL()
-        factory = RTCPeerConnectionFactory(
-            encoderFactory: RTCDefaultVideoEncoderFactory(),
-            decoderFactory: RTCDefaultVideoDecoderFactory()
-        )
         super.init()
         observeSocketCalls()
     }
@@ -76,10 +95,15 @@ final class VoiceCallService: NSObject {
 
     func startOutgoingVoiceCall(chat: Chat, currentUser: User, presenter: UIViewController) {
         debug("call button tapped")
+        guard NativeCallConfig.voiceCallsEnabled else {
+            presenter.presentVoiceCallAlert(message: "Voice calls are temporarily unavailable.")
+            return
+        }
         guard chat.type == .direct else {
             presenter.presentVoiceCallAlert(message: VoiceCallServiceError.groupCallsUnsupported.localizedDescription)
             return
         }
+        VoiceCallDiagnostics.record(.chatValidated)
         guard peerConnection == nil, currentCall == nil, !isStartingCall else {
             presenter.presentVoiceCallAlert(message: VoiceCallServiceError.alreadyInCall.localizedDescription)
             return
@@ -88,35 +112,50 @@ final class VoiceCallService: NSObject {
             presenter.presentVoiceCallAlert(message: VoiceCallServiceError.missingParticipant.localizedDescription)
             return
         }
+        VoiceCallDiagnostics.record(.calleeResolved)
         debug("callee resolved id=\(participant.id)")
+        self.currentUser = currentUser
+        VoiceCallDiagnostics.record(.sessionChecked)
+
+        isStartingCall = true
+        guard NativeCallConfig.webRTCEnabled else {
+            beginOutgoingVoiceCall(
+                chat: chat,
+                currentUser: currentUser,
+                participant: participant,
+                presenter: presenter
+            )
+            return
+        }
+
         guard SocketService.shared.isConnected else {
+            isStartingCall = false
             presenter.presentVoiceCallAlert(message: VoiceCallServiceError.socketUnavailable.localizedDescription)
             return
         }
         debug("socket connected for call start")
 
-        isStartingCall = true
-        Task { [weak self, weak presenter] in
+        VoiceCallDiagnostics.record(.microphonePermissionRequested)
+        Task { @MainActor [weak self, weak presenter] in
             guard let self else { return }
             let hasMicrophonePermission = await self.audioSession.requestMicrophonePermission()
-            await MainActor.run {
-                guard let presenter else {
-                    self.isStartingCall = false
-                    return
-                }
-                self.debug("microphone permission state granted=\(hasMicrophonePermission)")
-                guard hasMicrophonePermission else {
-                    self.isStartingCall = false
-                    presenter.presentVoiceCallAlert(message: VoiceCallServiceError.microphonePermissionDenied.localizedDescription)
-                    return
-                }
-                self.beginOutgoingVoiceCall(
-                    chat: chat,
-                    currentUser: currentUser,
-                    participant: participant,
-                    presenter: presenter
-                )
+            guard let presenter else {
+                self.isStartingCall = false
+                return
             }
+            self.debug("microphone permission state granted=\(hasMicrophonePermission)")
+            guard hasMicrophonePermission else {
+                self.isStartingCall = false
+                presenter.presentVoiceCallAlert(message: VoiceCallServiceError.microphonePermissionDenied.localizedDescription)
+                return
+            }
+            VoiceCallDiagnostics.record(.microphonePermissionGranted)
+            self.beginOutgoingVoiceCall(
+                chat: chat,
+                currentUser: currentUser,
+                participant: participant,
+                presenter: presenter
+            )
         }
     }
 
@@ -131,7 +170,7 @@ final class VoiceCallService: NSObject {
             presenter.presentVoiceCallAlert(message: VoiceCallServiceError.alreadyInCall.localizedDescription)
             return
         }
-        guard SocketService.shared.isConnected else {
+        guard !NativeCallConfig.webRTCEnabled || SocketService.shared.isConnected else {
             isStartingCall = false
             presenter.presentVoiceCallAlert(message: VoiceCallServiceError.socketUnavailable.localizedDescription)
             return
@@ -143,7 +182,25 @@ final class VoiceCallService: NSObject {
         self.callConnectedAt = nil
         self.isMuted = false
         self.isSpeakerOn = false
-        presentCallUI(from: presenter)
+        presentCallUI(from: presenter) { [weak self, weak presenter] in
+            guard let self else { return }
+            VoiceCallDiagnostics.record(.callUIPresented)
+            guard self.isStartingCall, self.currentParticipant?.id == participant.id else { return }
+            guard NativeCallConfig.webRTCEnabled else {
+                self.isStartingCall = false
+                self.publishFailure(VoiceCallServiceError.engineUnavailable.localizedDescription)
+                return
+            }
+            guard let presenter else {
+                self.isStartingCall = false
+                return
+            }
+            self.startOutgoingEngine(
+                chat: chat,
+                participant: participant,
+                presenter: presenter
+            )
+        }
         publish(
             status: .outgoing,
             callId: nil,
@@ -151,45 +208,60 @@ final class VoiceCallService: NSObject {
             callerId: currentUser.id,
             calleeId: participant.id
         )
+    }
 
-        Task { [weak self] in
+    private func startOutgoingEngine(
+        chat: Chat,
+        participant: VoiceCallParticipant,
+        presenter: UIViewController
+    ) {
+        Task { @MainActor [weak self, weak presenter] in
             guard let self else { return }
             do {
+                VoiceCallDiagnostics.record(.beforeAudioSessionStart)
                 try self.audioSession.start()
+                VoiceCallDiagnostics.record(.afterAudioSessionStart)
                 try await self.preparePeerConnection()
+                VoiceCallDiagnostics.record(.beforeOfferCreate)
                 let offer = try await self.createOffer()
+                VoiceCallDiagnostics.record(.afterOfferCreate)
+                VoiceCallDiagnostics.record(.beforeSocketCallOffer)
                 let call = try await SocketService.shared.sendCallOffer(
                     chatId: chat.id,
                     calleeId: participant.id,
                     offer: offer
                 )
-                await MainActor.run {
-                    self.currentCall = call
-                    self.isStartingCall = false
-                    self.publish(status: .ringing)
-                    self.flushLocalIceCandidates()
-                    self.debug("outgoing call emitted", callId: call.callId)
-                }
+                VoiceCallDiagnostics.record(.afterSocketCallOffer)
+                self.currentCall = call
+                self.isStartingCall = false
+                self.publish(status: .ringing)
+                self.flushLocalIceCandidates()
+                self.debug("outgoing call emitted", callId: call.callId)
             } catch {
-                await MainActor.run {
-                    self.debug("outgoing call failed", callId: self.currentCall?.callId)
-                    self.isStartingCall = false
-                    self.publishFailure(error.localizedDescription)
-                    self.cleanup(shouldDismissUI: false)
-                }
+                self.debug("outgoing call failed", callId: self.currentCall?.callId)
+                self.handleStartupFailure(error, presenter: presenter)
             }
         }
     }
 
     func acceptIncomingCall() {
         guard let call = currentCall, let offer = pendingOffer else { return }
+        guard NativeCallConfig.voiceCallsEnabled else {
+            rejectIncomingCall(reason: "voice_calls_disabled")
+            return
+        }
         guard call.type == .voice else {
             rejectIncomingCall(reason: "unsupported_video")
             return
         }
+        guard NativeCallConfig.webRTCEnabled else {
+            publishFailure(VoiceCallServiceError.engineUnavailable.localizedDescription)
+            return
+        }
         publish(status: .connecting)
 
-        Task { [weak self] in
+        VoiceCallDiagnostics.record(.microphonePermissionRequested)
+        Task { @MainActor [weak self] in
             guard let self else { return }
             do {
                 let hasMicrophonePermission = await self.audioSession.requestMicrophonePermission()
@@ -197,26 +269,24 @@ final class VoiceCallService: NSObject {
                 guard hasMicrophonePermission else {
                     throw VoiceCallServiceError.microphonePermissionDenied
                 }
+                VoiceCallDiagnostics.record(.microphonePermissionGranted)
+                VoiceCallDiagnostics.record(.beforeAudioSessionStart)
                 try self.audioSession.start()
+                VoiceCallDiagnostics.record(.afterAudioSessionStart)
                 try await self.preparePeerConnection()
                 try await self.applyRemoteDescription(signal: offer)
                 let answer = try await self.createAnswer()
                 let answered = try await SocketService.shared.sendCallAnswer(callId: call.callId, answer: answer)
-                await MainActor.run {
-                    self.currentCall = answered
-                    self.callConnectedAt = Date()
-                    self.publish(status: .active)
-                    self.flushLocalIceCandidates()
-                    self.flushRemoteIceCandidates()
-                    self.startHeartbeat()
-                }
+                self.currentCall = answered
+                self.callConnectedAt = Date()
+                self.publish(status: .active)
+                self.flushLocalIceCandidates()
+                self.flushRemoteIceCandidates()
+                self.startHeartbeat()
             } catch {
-                await MainActor.run {
-                    self.debug("accept failed", callId: call.callId)
-                    Task { try? await SocketService.shared.sendCallReject(callId: call.callId, reason: "accept_failed") }
-                    self.publishFailure("Unable to accept voice call.")
-                    self.cleanup(shouldDismissUI: false)
-                }
+                self.debug("accept failed", callId: call.callId)
+                Task { try? await SocketService.shared.sendCallReject(callId: call.callId, reason: "accept_failed") }
+                self.handleStartupFailure(error, presenter: nil)
             }
         }
     }
@@ -298,6 +368,10 @@ final class VoiceCallService: NSObject {
 
     private func handleIncomingOffer(_ event: SocketCallEvent) {
         let call = event.call
+        guard NativeCallConfig.voiceCallsEnabled else {
+            Task { try? await SocketService.shared.sendCallReject(callId: call.callId, reason: "voice_calls_disabled") }
+            return
+        }
         guard let offer = event.offer else {
             debug("incoming offer missing signal", callId: call.callId)
             Task { try? await SocketService.shared.sendCallReject(callId: call.callId, reason: "invalid_signal") }
@@ -335,7 +409,9 @@ final class VoiceCallService: NSObject {
                 guard let self else { return }
                 self.currentParticipant = participant
                 if let presenter = UIApplication.shared.topMostViewController() {
-                    self.presentCallUI(from: presenter)
+                    self.presentCallUI(from: presenter) {
+                        VoiceCallDiagnostics.record(.callUIPresented)
+                    }
                 }
                 self.publish(
                     status: .incoming,
@@ -403,29 +479,73 @@ final class VoiceCallService: NSObject {
         if peerConnection != nil { return }
         debug("preparing peer connection", callId: currentCall?.callId)
 
+        guard NativeCallConfig.webRTCEnabled else {
+            throw VoiceCallServiceError.engineUnavailable
+        }
+
+        let factory = try makePeerConnectionFactory()
+        let peer = try makePeerConnection(factory: factory)
+        let audioTrack = try makeLocalAudioTrack(factory: factory, peerConnection: peer)
+        audioTrack.isEnabled = !isMuted
+        localAudioTrack = audioTrack
+        peerConnection = peer
+        debug("local audio track added", callId: currentCall?.callId)
+    }
+
+    private func makePeerConnectionFactory() throws -> RTCPeerConnectionFactory {
+        VoiceCallDiagnostics.record(.beforeWebRTCFactoryCreate)
+        if let factory {
+            VoiceCallDiagnostics.record(.afterWebRTCFactoryCreate)
+            return factory
+        }
+
+        guard NSClassFromString("RTCPeerConnectionFactory") != nil else {
+            throw VoiceCallServiceError.engineUnavailable
+        }
+
+        RTCInitializeSSL()
+        let createdFactory = RTCPeerConnectionFactory(encoderFactory: nil, decoderFactory: nil)
+        factory = createdFactory
+        VoiceCallDiagnostics.record(.afterWebRTCFactoryCreate)
+        debug("WebRTC factory created", callId: currentCall?.callId)
+        return createdFactory
+    }
+
+    private func makePeerConnection(factory: RTCPeerConnectionFactory) throws -> RTCPeerConnection {
+        VoiceCallDiagnostics.record(.beforePeerConnectionCreate)
+
         let configuration = RTCConfiguration()
         configuration.iceServers = [
             RTCIceServer(urlStrings: ["stun:stun.l.google.com:19302"]),
             RTCIceServer(urlStrings: ["stun:stun1.l.google.com:19302"])
         ]
         configuration.sdpSemantics = .unifiedPlan
+        configuration.continualGatheringPolicy = .gatherContinually
 
         let constraints = RTCMediaConstraints(
             mandatoryConstraints: nil,
             optionalConstraints: ["DtlsSrtpKeyAgreement": kRTCMediaConstraintsValueTrue]
         )
         guard let peer = factory.peerConnection(with: configuration, constraints: constraints, delegate: self) else {
-            throw VoiceCallServiceError.invalidSignal
+            throw VoiceCallServiceError.engineUnavailable
         }
+        VoiceCallDiagnostics.record(.afterPeerConnectionCreate)
         debug("peer connection created", callId: currentCall?.callId)
+        return peer
+    }
 
+    private func makeLocalAudioTrack(
+        factory: RTCPeerConnectionFactory,
+        peerConnection: RTCPeerConnection
+    ) throws -> RTCAudioTrack {
+        VoiceCallDiagnostics.record(.beforeLocalAudioTrackCreate)
         let audioSource = factory.audioSource(with: RTCMediaConstraints(mandatoryConstraints: nil, optionalConstraints: nil))
         let audioTrack = factory.audioTrack(with: audioSource, trackId: "audio-\(UUID().uuidString)")
-        audioTrack.isEnabled = !isMuted
-        _ = peer.add(audioTrack, streamIds: ["chitchat-audio"])
-        localAudioTrack = audioTrack
-        peerConnection = peer
-        debug("local audio track added", callId: currentCall?.callId)
+        guard peerConnection.add(audioTrack, streamIds: ["chitchat-audio"]) != nil else {
+            throw VoiceCallServiceError.engineUnavailable
+        }
+        VoiceCallDiagnostics.record(.afterLocalAudioTrackCreate)
+        return audioTrack
     }
 
     private func createOffer() async throws -> [String: Any] {
@@ -587,8 +707,9 @@ final class VoiceCallService: NSObject {
         publish(status: .busy(message))
     }
 
-    private func presentCallUI(from presenter: UIViewController) {
+    private func presentCallUI(from presenter: UIViewController, completion: @escaping () -> Void) {
         if callViewController != nil {
+            DispatchQueue.main.async(execute: completion)
             return
         }
         assert(Thread.isMainThread)
@@ -600,7 +721,34 @@ final class VoiceCallService: NSObject {
         controller.loadViewIfNeeded()
         callViewController = controller
         let top = UIApplication.shared.topMostViewController() ?? presenter.presentedViewController ?? presenter
-        top.present(controller, animated: true)
+        top.present(controller, animated: true, completion: completion)
+    }
+
+    private func handleStartupFailure(_ error: Error, presenter: UIViewController?) {
+        isStartingCall = false
+        let publicMessage = "Could not start call. Please try again."
+        publishFailure(publicMessage)
+        cleanup(shouldDismissUI: false)
+
+        let errorName: String
+        if let callError = error as? VoiceCallServiceError {
+            errorName = callError.diagnosticName
+        } else {
+            errorName = String(describing: type(of: error))
+        }
+        debug("startup failed step=\(VoiceCallDiagnostics.lastStartupStep) error=\(errorName)")
+
+        var alertMessage = publicMessage
+        #if DEBUG
+        alertMessage += "\nStep: \(VoiceCallDiagnostics.lastStartupStep)\nError: \(errorName)"
+        #endif
+
+        let alertPresenter = callViewController
+            ?? UIApplication.shared.topMostViewController()
+            ?? presenter
+        if let alertPresenter, alertPresenter.presentedViewController == nil {
+            alertPresenter.presentVoiceCallAlert(message: alertMessage)
+        }
     }
 
     private func finishLocally(reason: String?) {
