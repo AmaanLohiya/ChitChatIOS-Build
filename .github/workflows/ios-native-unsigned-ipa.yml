@@ -1,0 +1,89 @@
+name: Build Native iOS Unsigned IPA
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-native-ios:
+    name: Build native UIKit app
+    runs-on: macos-latest
+    timeout-minutes: 30
+
+    defaults:
+      run:
+        shell: bash
+        working-directory: ios-native/ChitChatIOS
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: |
+          sudo xcode-select --switch /Applications/Xcode.app/Contents/Developer
+          xcodebuild -version
+
+      - name: List Xcode project
+        run: |
+          xcodebuild \
+            -project ChitChatIOS.xcodeproj \
+            -list
+
+      - name: Build unsigned Release app
+        env:
+          DERIVED_DATA_PATH: ${{ runner.temp }}/ChitChatIOSDerivedData
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project ChitChatIOS.xcodeproj \
+            -scheme ChitChatIOS \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination "generic/platform=iOS" \
+            -derivedDataPath "$DERIVED_DATA_PATH" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            DEVELOPMENT_TEAM="" \
+            build
+
+      - name: Package unsigned IPA
+        env:
+          DERIVED_DATA_PATH: ${{ runner.temp }}/ChitChatIOSDerivedData
+          PACKAGE_PATH: ${{ runner.temp }}/ChitChatIOSPackage
+        run: |
+          APP_PATH="$(find "$DERIVED_DATA_PATH/Build/Products/Release-iphoneos" \
+            -maxdepth 2 -type d -name "ChitChatIOS.app" -print -quit)"
+
+          if [[ -z "$APP_PATH" || ! -d "$APP_PATH" ]]; then
+            echo "::error::Release app was not found in DerivedData."
+            find "$DERIVED_DATA_PATH/Build/Products" -maxdepth 4 -print || true
+            exit 1
+          fi
+
+          rm -rf "$PACKAGE_PATH"
+          mkdir -p "$PACKAGE_PATH/Payload"
+          cp -R "$APP_PATH" "$PACKAGE_PATH/Payload/"
+
+          (
+            cd "$PACKAGE_PATH"
+            zip -qry "$GITHUB_WORKSPACE/ChitChatIOS-unsigned.ipa" Payload
+          )
+
+          test -s "$GITHUB_WORKSPACE/ChitChatIOS-unsigned.ipa"
+          echo "Created ChitChatIOS-unsigned.ipa"
+
+      - name: Upload unsigned IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ChitChatIOS-unsigned
+          path: ChitChatIOS-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Report success
+        working-directory: .
+        run: echo "Native iOS unsigned IPA is available as artifact ChitChatIOS-unsigned."

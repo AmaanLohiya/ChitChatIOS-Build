@@ -1,0 +1,9 @@
+* text=auto
+
+*.swift text eol=lf whitespace=-blank-at-eof
+*.plist text eol=lf whitespace=-blank-at-eof
+*.pbxproj text eol=lf whitespace=-blank-at-eof
+*.yml text eol=lf
+*.md text eol=lf
+*.json text eol=lf
+*.png binary
