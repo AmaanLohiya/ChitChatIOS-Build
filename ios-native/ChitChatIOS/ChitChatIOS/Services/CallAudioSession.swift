@@ -24,8 +24,16 @@ final class CallAudioSession {
 
     private let permissionSession = AVAudioSession.sharedInstance()
     private lazy var rtcAudioSession = RTCAudioSession.sharedInstance()
+    private let routeManager = CallAudioRouteManager.shared
     private(set) var isSpeakerEnabled = false
     private(set) var isActive = false
+    var onRouteChanged: ((CallAudioRouteSnapshot) -> Void)? {
+        didSet {
+            routeManager.onRouteChanged = { [weak self] snapshot in
+                self?.handleRouteChanged(snapshot)
+            }
+        }
+    }
 
     private init() {}
 
@@ -53,48 +61,72 @@ final class CallAudioSession {
 
     func start() throws {
         guard !isActive else { return }
-        rtcAudioSession.lockForConfiguration()
-        defer { rtcAudioSession.unlockForConfiguration() }
-
         do {
-            try rtcAudioSession.setCategory(.playAndRecord)
-            try rtcAudioSession.setMode(.voiceChat)
-            try rtcAudioSession.overrideOutputAudioPort(.none)
-            try rtcAudioSession.setActive(true)
-        } catch {
-            isActive = false
-            isSpeakerEnabled = false
-            debug("audio session activation failed")
-            throw CallAudioSessionError.activationFailed
+            rtcAudioSession.lockForConfiguration()
+            defer { rtcAudioSession.unlockForConfiguration() }
+
+            do {
+                let options: AVAudioSession.CategoryOptions = [
+                    .allowBluetooth,
+                    .allowBluetoothA2DP,
+                    .allowAirPlay
+                ]
+                try rtcAudioSession.setCategory(.playAndRecord)
+                try permissionSession.setCategory(.playAndRecord, mode: .voiceChat, options: options)
+                try rtcAudioSession.setMode(.voiceChat)
+                try rtcAudioSession.overrideOutputAudioPort(.none)
+                try rtcAudioSession.setActive(true)
+            } catch {
+                isActive = false
+                isSpeakerEnabled = false
+                debug("audio session activation failed")
+                throw CallAudioSessionError.activationFailed
+            }
         }
 
         isActive = true
-        isSpeakerEnabled = false
+        routeManager.startObserving()
+        isSpeakerEnabled = routeManager.snapshot.current.kind == .speaker
     }
 
-    func setSpeakerEnabled(_ enabled: Bool) throws {
+    func availableRoutes() -> [CallAudioRouteOption] {
+        routeManager.snapshot.availableRoutes
+    }
+
+    func currentRoute() -> CallAudioRouteOption {
+        routeManager.snapshot.current
+    }
+
+    func selectRoute(_ route: CallAudioRouteOption) throws {
         guard isActive else {
-            isSpeakerEnabled = enabled
-            return
+            throw CallAudioSessionError.routeChangeFailed
         }
-        rtcAudioSession.lockForConfiguration()
-        defer { rtcAudioSession.unlockForConfiguration() }
 
         do {
-            try rtcAudioSession.setCategory(.playAndRecord)
-            try rtcAudioSession.overrideOutputAudioPort(enabled ? .speaker : .none)
-            isSpeakerEnabled = enabled
+            try routeManager.select(route: route)
+            isSpeakerEnabled = routeManager.snapshot.current.kind == .speaker
         } catch {
             debug("audio route change failed")
             throw CallAudioSessionError.routeChangeFailed
         }
     }
 
-    func stop() {
+    func resetToReceiver() {
         guard isActive else {
             isSpeakerEnabled = false
             return
         }
+        routeManager.resetToReceiver()
+        isSpeakerEnabled = false
+    }
+
+    func stop() {
+        guard isActive else {
+            isSpeakerEnabled = false
+            routeManager.stopObserving()
+            return
+        }
+        routeManager.stopObserving()
         rtcAudioSession.lockForConfiguration()
         defer { rtcAudioSession.unlockForConfiguration() }
 
@@ -106,6 +138,11 @@ final class CallAudioSession {
         }
         isSpeakerEnabled = false
         isActive = false
+    }
+
+    private func handleRouteChanged(_ snapshot: CallAudioRouteSnapshot) {
+        isSpeakerEnabled = snapshot.current.kind == .speaker
+        onRouteChanged?(snapshot)
     }
 
     private func debug(_ message: String) {

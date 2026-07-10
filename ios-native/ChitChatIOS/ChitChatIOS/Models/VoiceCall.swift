@@ -122,6 +122,8 @@ struct VoiceCallPresentationState: Equatable {
     let connectedAt: Date?
     let isMuted: Bool
     let isSpeakerOn: Bool
+    let audioRouteName: String
+    let audioRouteIconName: String
 }
 
 struct SocketCallEvent {

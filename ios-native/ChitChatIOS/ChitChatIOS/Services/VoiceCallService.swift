@@ -70,6 +70,11 @@ final class VoiceCallService: NSObject {
 
     private override init() {
         super.init()
+        audioSession.onRouteChanged = { [weak self] snapshot in
+            DispatchQueue.main.async {
+                self?.handleAudioRouteChanged(snapshot)
+            }
+        }
         observeSocketCalls()
     }
 
@@ -317,14 +322,21 @@ final class VoiceCallService: NSObject {
         publishCurrentState()
     }
 
-    func toggleSpeaker() {
+    func availableAudioRoutes() -> [CallAudioRouteOption] {
+        audioSession.availableRoutes()
+    }
+
+    func currentAudioRouteID() -> String {
+        audioSession.currentRoute().id
+    }
+
+    func selectAudioRoute(_ route: CallAudioRouteOption) {
         do {
-            let next = !isSpeakerOn
-            try audioSession.setSpeakerEnabled(next)
-            isSpeakerOn = audioSession.isSpeakerEnabled
+            try audioSession.selectRoute(route)
+            isSpeakerOn = audioSession.currentRoute().kind == .speaker
             publishCurrentState()
         } catch {
-            debug("speaker toggle failed", callId: currentCall?.callId)
+            debug("audio route selection failed", callId: currentCall?.callId)
         }
     }
 
@@ -660,6 +672,12 @@ final class VoiceCallService: NSObject {
         }
     }
 
+    private func handleAudioRouteChanged(_ snapshot: CallAudioRouteSnapshot) {
+        isSpeakerOn = snapshot.current.kind == .speaker
+        guard currentParticipant != nil else { return }
+        publishCurrentState()
+    }
+
     private func publish(
         status: VoiceCallPresentationStatus,
         callId: String? = nil,
@@ -669,6 +687,8 @@ final class VoiceCallService: NSObject {
     ) {
         guard let participant = currentParticipant else { return }
         let call = currentCall
+        let route = audioSession.currentRoute()
+        isSpeakerOn = route.kind == .speaker
         let state = VoiceCallPresentationState(
             direction: direction,
             status: status,
@@ -680,7 +700,9 @@ final class VoiceCallService: NSObject {
             startedAt: callStartedAt,
             connectedAt: callConnectedAt,
             isMuted: isMuted,
-            isSpeakerOn: isSpeakerOn
+            isSpeakerOn: route.kind == .speaker,
+            audioRouteName: route.title,
+            audioRouteIconName: route.kind.iconName
         )
         callViewController?.render(state)
     }

@@ -220,7 +220,7 @@ final class VoiceCallViewController: UIViewController {
         rejectButton.addTarget(self, action: #selector(rejectCall), for: .touchUpInside)
         acceptButton.addTarget(self, action: #selector(acceptCall), for: .touchUpInside)
         muteButton.addTarget(self, action: #selector(toggleMute), for: .touchUpInside)
-        speakerButton.addTarget(self, action: #selector(toggleSpeaker), for: .touchUpInside)
+        speakerButton.addTarget(self, action: #selector(showAudioRoutes), for: .touchUpInside)
         hangupButton.addTarget(self, action: #selector(endCall), for: .touchUpInside)
 
         incomingStack.translatesAutoresizingMaskIntoConstraints = false
@@ -357,7 +357,7 @@ final class VoiceCallViewController: UIViewController {
         }
 
         updateMuteButton(isMuted: state.isMuted)
-        speakerButton.tintColor = state.isSpeakerOn ? UIColor(hex: "#4BC5A6") : UIColor(hex: "#F2F8FB")
+        updateAudioRouteButton(for: state)
     }
 
     private func updateMuteButton(isMuted: Bool) {
@@ -368,6 +368,18 @@ final class VoiceCallViewController: UIViewController {
             withConfiguration: UIImage.SymbolConfiguration(pointSize: 25, weight: .medium)
         )
         muteButton.configuration = configuration
+    }
+
+    private func updateAudioRouteButton(for state: VoiceCallPresentationState) {
+        var configuration = speakerButton.configuration
+        configuration?.title = state.audioRouteName
+        configuration?.image = UIImage(
+            systemName: state.audioRouteIconName,
+            withConfiguration: UIImage.SymbolConfiguration(pointSize: 25, weight: .medium)
+        )
+        configuration?.baseForegroundColor = state.isSpeakerOn ? UIColor(hex: "#4BC5A6") : UIColor(hex: "#F2F8FB")
+        speakerButton.configuration = configuration
+        speakerButton.tintColor = state.isSpeakerOn ? UIColor(hex: "#4BC5A6") : UIColor(hex: "#F2F8FB")
     }
 
     private func updateDurationTimer(for state: VoiceCallPresentationState) {
@@ -398,8 +410,32 @@ final class VoiceCallViewController: UIViewController {
         service.toggleMute()
     }
 
-    @objc private func toggleSpeaker() {
-        service.toggleSpeaker()
+    @objc private func showAudioRoutes() {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { [weak self] in self?.showAudioRoutes() }
+            return
+        }
+        guard presentedViewController == nil else { return }
+
+        let routes = service.availableAudioRoutes()
+        guard !routes.isEmpty else { return }
+
+        let currentRouteID = service.currentAudioRouteID()
+        let alert = UIAlertController(title: "Audio", message: nil, preferredStyle: .actionSheet)
+        routes.forEach { route in
+            let title = route.id == currentRouteID ? "✓ \(route.title)" : route.title
+            alert.addAction(UIAlertAction(title: title, style: .default) { [weak self] _ in
+                self?.service.selectAudioRoute(route)
+            })
+        }
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+
+        if let popover = alert.popoverPresentationController {
+            popover.sourceView = speakerButton
+            popover.sourceRect = speakerButton.bounds
+        }
+
+        present(alert, animated: true)
     }
 
     @objc private func endCall() {
