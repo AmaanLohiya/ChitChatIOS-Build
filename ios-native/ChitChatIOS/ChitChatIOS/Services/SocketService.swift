@@ -63,7 +63,7 @@ enum SocketServiceError: LocalizedError {
 final class SocketService {
     static let shared = SocketService()
 
-    private let baseURL = URL(string: "http://156.67.105.161:8020")!
+    private let baseURL = URL(string: "http://156.67.105.161:8020")
     private let notificationCenter: NotificationCenter
     private var manager: SocketManager?
     private var socket: SocketIOClient?
@@ -90,6 +90,10 @@ final class SocketService {
     func connect(accessToken: String) {
         guard !accessToken.isEmpty else { return }
         DispatchQueue.main.async {
+            guard let baseURL = self.baseURL else {
+                self.debug("invalid server URL")
+                return
+            }
             if self.activeToken == accessToken, let socket = self.socket {
                 if socket.status != .connected && socket.status != .connecting {
                     self.debug("reconnecting")
@@ -102,7 +106,7 @@ final class SocketService {
             self.activeToken = accessToken
 
             let manager = SocketManager(
-                socketURL: self.baseURL,
+                socketURL: baseURL,
                 config: [
                     .log(false),
                     .compress,

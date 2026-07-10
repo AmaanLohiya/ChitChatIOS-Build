@@ -223,7 +223,7 @@ private final class ChatHeaderAvatarView: UIView {
     }
 
     required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
+        return nil
     }
 
     override func layoutSubviews() {
@@ -293,7 +293,7 @@ private final class ImagePreviewViewController: UIViewController {
     }
 
     required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
+        return nil
     }
 
     override var preferredStatusBarStyle: UIStatusBarStyle { .lightContent }
@@ -410,7 +410,7 @@ final class ChatDetailViewController: BaseViewController {
     }
 
     required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
+        return nil
     }
 
     override func viewDidLoad() {
@@ -1216,22 +1216,14 @@ final class ChatDetailViewController: BaseViewController {
     }
 
     @objc private func startVoiceCall() {
-        VoiceCallDiagnostics.record(.tapReceived)
-        guard NativeCallConfig.voiceCallsEnabled else {
-            showAlert(message: "Voice calls are temporarily unavailable.")
-            return
-        }
         guard chat.type == .direct else {
             showAlert(message: "Voice calls are available only in direct chats.")
             return
         }
-        VoiceCallDiagnostics.record(.chatValidated)
         guard chat.otherParticipant(viewerUserId: currentUser.id) != nil else {
             showAlert(message: "Voice calls are available only in direct chats.")
             return
         }
-        VoiceCallDiagnostics.record(.calleeResolved)
-        VoiceCallDiagnostics.record(.sessionChecked)
         VoiceCallService.shared.startOutgoingVoiceCall(
             chat: chat,
             currentUser: currentUser,

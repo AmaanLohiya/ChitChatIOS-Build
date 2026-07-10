@@ -1,5 +1,6 @@
 ﻿import AVFoundation
 import Foundation
+import WebRTC
 
 enum CallAudioSessionError: LocalizedError {
     case microphonePermissionDenied
@@ -21,7 +22,8 @@ enum CallAudioSessionError: LocalizedError {
 final class CallAudioSession {
     static let shared = CallAudioSession()
 
-    private let session = AVAudioSession.sharedInstance()
+    private let permissionSession = AVAudioSession.sharedInstance()
+    private lazy var rtcAudioSession = RTCAudioSession.sharedInstance()
     private(set) var isSpeakerEnabled = false
     private(set) var isActive = false
 
@@ -29,7 +31,7 @@ final class CallAudioSession {
 
     func requestMicrophonePermission() async -> Bool {
         await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
-            switch session.recordPermission {
+            switch permissionSession.recordPermission {
             case .granted:
                 debug("microphone permission granted")
                 continuation.resume(returning: true)
@@ -38,7 +40,7 @@ final class CallAudioSession {
                 continuation.resume(returning: false)
             case .undetermined:
                 debug("requesting microphone permission")
-                session.requestRecordPermission { [weak self] granted in
+                permissionSession.requestRecordPermission { [weak self] granted in
                     self?.debug("microphone permission result granted=\(granted)")
                     continuation.resume(returning: granted)
                 }
@@ -50,22 +52,24 @@ final class CallAudioSession {
     }
 
     func start() throws {
+        guard !isActive else { return }
+        rtcAudioSession.lockForConfiguration()
+        defer { rtcAudioSession.unlockForConfiguration() }
+
         do {
-            try session.setCategory(
-                .playAndRecord,
-                mode: .voiceChat,
-                options: [.allowBluetooth, .allowBluetoothA2DP]
-            )
-            try session.setActive(true, options: [])
-            isActive = true
-            isSpeakerEnabled = false
-            try session.overrideOutputAudioPort(.none)
+            try rtcAudioSession.setCategory(.playAndRecord)
+            try rtcAudioSession.setMode(.voiceChat)
+            try rtcAudioSession.overrideOutputAudioPort(.none)
+            try rtcAudioSession.setActive(true)
         } catch {
             isActive = false
             isSpeakerEnabled = false
             debug("audio session activation failed")
             throw CallAudioSessionError.activationFailed
         }
+
+        isActive = true
+        isSpeakerEnabled = false
     }
 
     func setSpeakerEnabled(_ enabled: Bool) throws {
@@ -73,8 +77,12 @@ final class CallAudioSession {
             isSpeakerEnabled = enabled
             return
         }
+        rtcAudioSession.lockForConfiguration()
+        defer { rtcAudioSession.unlockForConfiguration() }
+
         do {
-            try session.overrideOutputAudioPort(enabled ? .speaker : .none)
+            try rtcAudioSession.setCategory(.playAndRecord)
+            try rtcAudioSession.overrideOutputAudioPort(enabled ? .speaker : .none)
             isSpeakerEnabled = enabled
         } catch {
             debug("audio route change failed")
@@ -83,9 +91,16 @@ final class CallAudioSession {
     }
 
     func stop() {
+        guard isActive else {
+            isSpeakerEnabled = false
+            return
+        }
+        rtcAudioSession.lockForConfiguration()
+        defer { rtcAudioSession.unlockForConfiguration() }
+
         do {
-            try session.overrideOutputAudioPort(.none)
-            try session.setActive(false, options: [.notifyOthersOnDeactivation])
+            try rtcAudioSession.overrideOutputAudioPort(.none)
+            try rtcAudioSession.setActive(false)
         } catch {
             debug("audio session cleanup failed")
         }

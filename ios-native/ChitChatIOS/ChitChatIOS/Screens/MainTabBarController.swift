@@ -26,7 +26,7 @@ private final class ChitChatTabBar: UITabBar {
     }
 
     required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
+        return nil
     }
 
     override func sizeThatFits(_ size: CGSize) -> CGSize {
@@ -80,7 +80,7 @@ final class MainTabBarController: UITabBarController {
     }
 
     required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
+        return nil
     }
 
     override func viewDidLoad() {
