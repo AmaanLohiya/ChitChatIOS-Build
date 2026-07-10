@@ -26,6 +26,19 @@ jobs:
           sudo xcode-select --switch /Applications/Xcode.app/Contents/Developer
           xcodebuild -version
 
+      - name: Prepare artifact names
+        working-directory: .
+        run: |
+          SHORT_SHA="${GITHUB_SHA::7}"
+          echo "SHORT_SHA=$SHORT_SHA" >> "$GITHUB_ENV"
+          echo "IPA_NAME=ChitChatIOS-${SHORT_SHA}-unsigned.ipa" >> "$GITHUB_ENV"
+          echo "DSYM_ZIP_NAME=ChitChatIOS-${SHORT_SHA}.app.dSYM.zip" >> "$GITHUB_ENV"
+          echo "INFO_PLIST_NAME=ChitChatIOS-${SHORT_SHA}-Info.plist" >> "$GITHUB_ENV"
+          echo "BUILD_METADATA_NAME=ChitChatIOS-${SHORT_SHA}-build-metadata.txt" >> "$GITHUB_ENV"
+          echo "XCODEBUILD_LOG_NAME=xcodebuild-${SHORT_SHA}.log" >> "$GITHUB_ENV"
+          echo "LINKED_LIBRARIES_NAME=linked-libraries-${SHORT_SHA}.txt" >> "$GITHUB_ENV"
+          echo "RPATH_LOG_NAME=rpaths-${SHORT_SHA}.txt" >> "$GITHUB_ENV"
+
       - name: List Xcode project
         run: |
           xcodebuild \
@@ -48,21 +61,90 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
             DEVELOPMENT_TEAM="" \
-            build
+            build 2>&1 | tee "$GITHUB_WORKSPACE/$XCODEBUILD_LOG_NAME"
 
-      - name: Package unsigned IPA
+      - name: Inspect build output and package unsigned IPA
         env:
           DERIVED_DATA_PATH: ${{ runner.temp }}/ChitChatIOSDerivedData
           PACKAGE_PATH: ${{ runner.temp }}/ChitChatIOSPackage
         run: |
+          set -euo pipefail
           APP_PATH="$(find "$DERIVED_DATA_PATH/Build/Products/Release-iphoneos" \
             -maxdepth 2 -type d -name "ChitChatIOS.app" -print -quit)"
+          DSYM_PATH="$(find "$DERIVED_DATA_PATH/Build/Products/Release-iphoneos" \
+            -maxdepth 2 -type d -name "ChitChatIOS.app.dSYM" -print -quit)"
 
           if [[ -z "$APP_PATH" || ! -d "$APP_PATH" ]]; then
             echo "::error::Release app was not found in DerivedData."
             find "$DERIVED_DATA_PATH/Build/Products" -maxdepth 4 -print || true
             exit 1
           fi
+          if [[ -z "$DSYM_PATH" || ! -d "$DSYM_PATH" ]]; then
+            echo "::error::Release dSYM was not found in DerivedData."
+            find "$DERIVED_DATA_PATH/Build/Products" -maxdepth 4 -print || true
+            exit 1
+          fi
+
+          INFO_PLIST="$APP_PATH/Info.plist"
+          EXECUTABLE_NAME="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$INFO_PLIST")"
+          APP_BINARY="$APP_PATH/$EXECUTABLE_NAME"
+          BUNDLE_ID="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$INFO_PLIST")"
+          APP_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$INFO_PLIST")"
+          BUILD_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$INFO_PLIST")"
+          MICROPHONE_TEXT="$(/usr/libexec/PlistBuddy -c 'Print :NSMicrophoneUsageDescription' "$INFO_PLIST" 2>/dev/null || true)"
+
+          if [[ -z "${MICROPHONE_TEXT//[[:space:]]/}" ]]; then
+            echo "::error::NSMicrophoneUsageDescription is missing or empty in the processed app Info.plist."
+            exit 1
+          fi
+          if [[ ! -d "$APP_PATH/Frameworks/WebRTC.framework" ]]; then
+            echo "::error::WebRTC.framework is not embedded in ChitChatIOS.app/Frameworks."
+            find "$APP_PATH" -maxdepth 3 -print || true
+            exit 1
+          fi
+
+          echo "Linked libraries:"
+          otool -L "$APP_BINARY" | tee "$GITHUB_WORKSPACE/$LINKED_LIBRARIES_NAME"
+          otool -l "$APP_BINARY" > "$GITHUB_WORKSPACE/$RPATH_LOG_NAME"
+          cat "$GITHUB_WORKSPACE/$RPATH_LOG_NAME"
+          if ! grep -q "@executable_path/Frameworks" "$GITHUB_WORKSPACE/$RPATH_LOG_NAME"; then
+            echo "::error::App binary is missing @executable_path/Frameworks runpath."
+            exit 1
+          fi
+
+          APP_UUIDS="$(dwarfdump --uuid "$APP_BINARY" | awk '{print $2}' | sort -u)"
+          DSYM_UUIDS="$(dwarfdump --uuid "$DSYM_PATH" | awk '{print $2}' | sort -u)"
+          echo "App UUIDs:"
+          echo "$APP_UUIDS"
+          echo "dSYM UUIDs:"
+          echo "$DSYM_UUIDS"
+          for uuid in $APP_UUIDS; do
+            if ! echo "$DSYM_UUIDS" | grep -qx "$uuid"; then
+              echo "::error::dSYM UUIDs do not include app UUID $uuid."
+              exit 1
+            fi
+          done
+
+          DEPLOYMENT_TARGET="$(xcodebuild \
+            -project ChitChatIOS.xcodeproj \
+            -scheme ChitChatIOS \
+            -configuration Release \
+            -sdk iphoneos \
+            -showBuildSettings | awk -F= '/IPHONEOS_DEPLOYMENT_TARGET/ {gsub(/[[:space:]]/, "", $2); print $2; exit}')"
+
+          cp "$INFO_PLIST" "$GITHUB_WORKSPACE/$INFO_PLIST_NAME"
+          ditto -c -k --keepParent "$DSYM_PATH" "$GITHUB_WORKSPACE/$DSYM_ZIP_NAME"
+          {
+            echo "full_git_sha=$GITHUB_SHA"
+            echo "short_git_sha=$SHORT_SHA"
+            echo "xcode_version=$(xcodebuild -version | tr '\n' ' ')"
+            echo "bundle_identifier=$BUNDLE_ID"
+            echo "app_version=$APP_VERSION"
+            echo "build_version=$BUILD_VERSION"
+            echo "deployment_target=$DEPLOYMENT_TARGET"
+            echo "app_executable_uuid=$(echo "$APP_UUIDS" | tr '\n' ' ')"
+            echo "dsym_uuid=$(echo "$DSYM_UUIDS" | tr '\n' ' ')"
+          } > "$GITHUB_WORKSPACE/$BUILD_METADATA_NAME"
 
           rm -rf "$PACKAGE_PATH"
           mkdir -p "$PACKAGE_PATH/Payload"
@@ -70,20 +152,43 @@ jobs:
 
           (
             cd "$PACKAGE_PATH"
-            zip -qry "$GITHUB_WORKSPACE/ChitChatIOS-unsigned.ipa" Payload
+            zip -qry "$GITHUB_WORKSPACE/$IPA_NAME" Payload
           )
 
-          test -s "$GITHUB_WORKSPACE/ChitChatIOS-unsigned.ipa"
-          echo "Created ChitChatIOS-unsigned.ipa"
+          test -s "$GITHUB_WORKSPACE/$IPA_NAME"
+          echo "Created $IPA_NAME"
+          echo "Verified native Release IPA: WebRTC embedded, microphone usage present, app/dSYM UUIDs match."
 
       - name: Upload unsigned IPA artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ChitChatIOS-unsigned
-          path: ChitChatIOS-unsigned.ipa
+          name: ChitChatIOS-${{ env.SHORT_SHA }}-unsigned-ipa
+          path: ${{ env.IPA_NAME }}
           if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload dSYM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ChitChatIOS-${{ env.SHORT_SHA }}-dsym
+          path: ${{ env.DSYM_ZIP_NAME }}
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload build diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ChitChatIOS-${{ env.SHORT_SHA }}-build-diagnostics
+          path: |
+            ${{ env.INFO_PLIST_NAME }}
+            ${{ env.BUILD_METADATA_NAME }}
+            ${{ env.XCODEBUILD_LOG_NAME }}
+            ${{ env.LINKED_LIBRARIES_NAME }}
+            ${{ env.RPATH_LOG_NAME }}
+          if-no-files-found: warn
           retention-days: 14
 
       - name: Report success
         working-directory: .
-        run: echo "Native iOS unsigned IPA is available as artifact ChitChatIOS-unsigned."
+        run: echo "Native iOS unsigned IPA is available as artifact ChitChatIOS-${SHORT_SHA}-unsigned-ipa."
