@@ -52,22 +52,7 @@
 		F60000000000000000000003 /* VoiceCallService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F60000000000000000000023 /* VoiceCallService.swift */; };
 		F60000000000000000000004 /* VoiceCallViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = F60000000000000000000024 /* VoiceCallViewController.swift */; };
 		F60000000000000000000005 /* WebRTC in Frameworks */ = {isa = PBXBuildFile; productRef = F60000000000000000000031 /* WebRTC */; };
-		F60000000000000000000006 /* WebRTC in Embed Frameworks */ = {isa = PBXBuildFile; productRef = F60000000000000000000031 /* WebRTC */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
-
-/* Begin PBXCopyFilesBuildPhase section */
-		F60000000000000000000040 /* Embed Frameworks */ = {
-			isa = PBXCopyFilesBuildPhase;
-			buildActionMask = 2147483647;
-			dstPath = "";
-			dstSubfolderSpec = 10;
-			files = (
-				F60000000000000000000006 /* WebRTC in Embed Frameworks */,
-			);
-			name = "Embed Frameworks";
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		A10000000000000000000020 /* ChitChatIOS.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ChitChatIOS.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -246,7 +231,6 @@
 			buildPhases = (
 				A10000000000000000000061 /* Sources */,
 				A10000000000000000000040 /* Frameworks */,
-				F60000000000000000000040 /* Embed Frameworks */,
 				A10000000000000000000062 /* Resources */,
 			);
 			buildRules = (

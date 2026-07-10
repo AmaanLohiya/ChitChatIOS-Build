@@ -38,12 +38,29 @@ jobs:
           echo "XCODEBUILD_LOG_NAME=xcodebuild-${SHORT_SHA}.log" >> "$GITHUB_ENV"
           echo "LINKED_LIBRARIES_NAME=linked-libraries-${SHORT_SHA}.txt" >> "$GITHUB_ENV"
           echo "RPATH_LOG_NAME=rpaths-${SHORT_SHA}.txt" >> "$GITHUB_ENV"
+          echo "PACKAGE_PATHS_NAME=swift-package-paths-${SHORT_SHA}.txt" >> "$GITHUB_ENV"
+          echo "FRAMEWORK_LIST_NAME=framework-listing-${SHORT_SHA}.txt" >> "$GITHUB_ENV"
+          echo "APP_UUID_NAME=app-uuid-${SHORT_SHA}.txt" >> "$GITHUB_ENV"
+          echo "DSYM_UUID_NAME=dsym-uuid-${SHORT_SHA}.txt" >> "$GITHUB_ENV"
+          echo "LIPO_INFO_NAME=webrtc-lipo-${SHORT_SHA}.txt" >> "$GITHUB_ENV"
 
       - name: List Xcode project
         run: |
           xcodebuild \
             -project ChitChatIOS.xcodeproj \
             -list
+
+      - name: Resolve Swift package dependencies
+        env:
+          DERIVED_DATA_PATH: ${{ runner.temp }}/ChitChatIOSDerivedData
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -resolvePackageDependencies \
+            -project ChitChatIOS.xcodeproj \
+            -scheme ChitChatIOS \
+            -derivedDataPath "$DERIVED_DATA_PATH" \
+            2>&1 | tee "$GITHUB_WORKSPACE/$XCODEBUILD_LOG_NAME"
 
       - name: Build unsigned Release app
         env:
@@ -61,14 +78,15 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
             DEVELOPMENT_TEAM="" \
-            build 2>&1 | tee "$GITHUB_WORKSPACE/$XCODEBUILD_LOG_NAME"
+            build 2>&1 | tee -a "$GITHUB_WORKSPACE/$XCODEBUILD_LOG_NAME"
 
-      - name: Inspect build output and package unsigned IPA
+      - name: Embed WebRTC framework and package unsigned IPA
         env:
           DERIVED_DATA_PATH: ${{ runner.temp }}/ChitChatIOSDerivedData
           PACKAGE_PATH: ${{ runner.temp }}/ChitChatIOSPackage
         run: |
           set -euo pipefail
+
           APP_PATH="$(find "$DERIVED_DATA_PATH/Build/Products/Release-iphoneos" \
             -maxdepth 2 -type d -name "ChitChatIOS.app" -print -quit)"
           DSYM_PATH="$(find "$DERIVED_DATA_PATH/Build/Products/Release-iphoneos" \
@@ -85,6 +103,62 @@ jobs:
             exit 1
           fi
 
+          echo "Swift package WebRTC candidates:" | tee "$GITHUB_WORKSPACE/$PACKAGE_PATHS_NAME"
+          for root in "$DERIVED_DATA_PATH/SourcePackages" "$HOME/Library/Developer/Xcode/DerivedData"; do
+            if [[ -d "$root" ]]; then
+              find "$root" \( -iname "WebRTC.xcframework" -o -iname "WebRTC.framework" \) -print
+            fi
+          done | sort -u | tee -a "$GITHUB_WORKSPACE/$PACKAGE_PATHS_NAME"
+
+          WEBRTC_DEVICE_FRAMEWORK="$(
+            PACKAGE_PATHS_FILE="$GITHUB_WORKSPACE/$PACKAGE_PATHS_NAME" python3 <<'PY'
+          import os
+          import plistlib
+          import sys
+
+          with open(os.environ["PACKAGE_PATHS_FILE"], "r", encoding="utf-8") as handle:
+              candidates = [line.strip() for line in handle if line.strip()]
+
+          xcframeworks = [
+              path for path in candidates
+              if os.path.basename(path).lower() == "webrtc.xcframework"
+          ]
+
+          for xcframework in xcframeworks:
+              info_path = os.path.join(xcframework, "Info.plist")
+              if not os.path.isfile(info_path):
+                  continue
+              with open(info_path, "rb") as handle:
+                  info = plistlib.load(handle)
+              for library in info.get("AvailableLibraries", []):
+                  if library.get("SupportedPlatform") != "ios":
+                      continue
+                  if library.get("SupportedPlatformVariant"):
+                      continue
+                  if "arm64" not in library.get("SupportedArchitectures", []):
+                      continue
+                  identifier = library.get("LibraryIdentifier")
+                  library_path = library.get("LibraryPath", "WebRTC.framework")
+                  if not identifier:
+                      continue
+                  framework = os.path.join(xcframework, identifier, library_path)
+                  binary = os.path.join(framework, "WebRTC")
+                  if os.path.isdir(framework) and os.path.isfile(binary):
+                      print(framework)
+                      sys.exit(0)
+
+          print("No iOS device arm64 WebRTC.framework slice found in WebRTC.xcframework.", file=sys.stderr)
+          sys.exit(1)
+          PY
+          )"
+
+          echo "Selected WebRTC device framework: $WEBRTC_DEVICE_FRAMEWORK" | tee -a "$GITHUB_WORKSPACE/$PACKAGE_PATHS_NAME"
+
+          mkdir -p "$APP_PATH/Frameworks"
+          rm -rf "$APP_PATH/Frameworks/WebRTC.framework" "$APP_PATH/Frameworks/WebRTC.xcframework"
+          ditto "$WEBRTC_DEVICE_FRAMEWORK" "$APP_PATH/Frameworks/WebRTC.framework"
+          xattr -cr "$APP_PATH/Frameworks/WebRTC.framework" || true
+
           INFO_PLIST="$APP_PATH/Info.plist"
           EXECUTABLE_NAME="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$INFO_PLIST")"
           APP_BINARY="$APP_PATH/$EXECUTABLE_NAME"
@@ -97,27 +171,38 @@ jobs:
             echo "::error::NSMicrophoneUsageDescription is missing or empty in the processed app Info.plist."
             exit 1
           fi
-          if [[ ! -d "$APP_PATH/Frameworks/WebRTC.framework" ]]; then
-            echo "::error::WebRTC.framework is not embedded in ChitChatIOS.app/Frameworks."
-            find "$APP_PATH" -maxdepth 3 -print || true
+
+          otool -L "$APP_BINARY" | tee "$GITHUB_WORKSPACE/$LINKED_LIBRARIES_NAME"
+          if ! grep -q "@rpath/WebRTC.framework/WebRTC" "$GITHUB_WORKSPACE/$LINKED_LIBRARIES_NAME"; then
+            echo "::error::App executable does not reference @rpath/WebRTC.framework/WebRTC."
             exit 1
           fi
 
-          echo "Linked libraries:"
-          otool -L "$APP_BINARY" | tee "$GITHUB_WORKSPACE/$LINKED_LIBRARIES_NAME"
-          otool -l "$APP_BINARY" > "$GITHUB_WORKSPACE/$RPATH_LOG_NAME"
-          cat "$GITHUB_WORKSPACE/$RPATH_LOG_NAME"
+          test -d "$APP_PATH/Frameworks/WebRTC.framework"
+          test -f "$APP_PATH/Frameworks/WebRTC.framework/WebRTC"
+          lipo -info "$APP_PATH/Frameworks/WebRTC.framework/WebRTC" | tee "$GITHUB_WORKSPACE/$LIPO_INFO_NAME"
+          if ! grep -q "arm64" "$GITHUB_WORKSPACE/$LIPO_INFO_NAME"; then
+            echo "::error::Embedded WebRTC.framework does not contain arm64."
+            exit 1
+          fi
+
+          otool -l "$APP_BINARY" | tee "$GITHUB_WORKSPACE/$RPATH_LOG_NAME"
           if ! grep -q "@executable_path/Frameworks" "$GITHUB_WORKSPACE/$RPATH_LOG_NAME"; then
             echo "::error::App binary is missing @executable_path/Frameworks runpath."
             exit 1
           fi
 
+          if [[ -d "$APP_PATH/Frameworks/WebRTC.xcframework" ]]; then
+            echo "::error::Invalid nested WebRTC.xcframework found in app bundle."
+            exit 1
+          fi
+
+          find "$APP_PATH/Frameworks/WebRTC.framework" -maxdepth 2 -print | tee "$GITHUB_WORKSPACE/$FRAMEWORK_LIST_NAME"
+
           APP_UUIDS="$(dwarfdump --uuid "$APP_BINARY" | awk '{print $2}' | sort -u)"
           DSYM_UUIDS="$(dwarfdump --uuid "$DSYM_PATH" | awk '{print $2}' | sort -u)"
-          echo "App UUIDs:"
-          echo "$APP_UUIDS"
-          echo "dSYM UUIDs:"
-          echo "$DSYM_UUIDS"
+          echo "$APP_UUIDS" | tee "$GITHUB_WORKSPACE/$APP_UUID_NAME"
+          echo "$DSYM_UUIDS" | tee "$GITHUB_WORKSPACE/$DSYM_UUID_NAME"
           for uuid in $APP_UUIDS; do
             if ! echo "$DSYM_UUIDS" | grep -qx "$uuid"; then
               echo "::error::dSYM UUIDs do not include app UUID $uuid."
@@ -142,6 +227,7 @@ jobs:
             echo "app_version=$APP_VERSION"
             echo "build_version=$BUILD_VERSION"
             echo "deployment_target=$DEPLOYMENT_TARGET"
+            echo "selected_webrtc_framework=$WEBRTC_DEVICE_FRAMEWORK"
             echo "app_executable_uuid=$(echo "$APP_UUIDS" | tr '\n' ' ')"
             echo "dsym_uuid=$(echo "$DSYM_UUIDS" | tr '\n' ' ')"
           } > "$GITHUB_WORKSPACE/$BUILD_METADATA_NAME"
@@ -150,16 +236,23 @@ jobs:
           mkdir -p "$PACKAGE_PATH/Payload"
           cp -R "$APP_PATH" "$PACKAGE_PATH/Payload/"
 
+          IPA_PATH="$GITHUB_WORKSPACE/$IPA_NAME"
           (
             cd "$PACKAGE_PATH"
-            zip -qry "$GITHUB_WORKSPACE/$IPA_NAME" Payload
+            zip -qry "$IPA_PATH" Payload
           )
 
-          test -s "$GITHUB_WORKSPACE/$IPA_NAME"
+          test -s "$IPA_PATH"
+          if ! unzip -l "$IPA_PATH" | grep -q "Payload/ChitChatIOS.app/Frameworks/WebRTC.framework/WebRTC"; then
+            echo "::error::IPA does not contain Payload/ChitChatIOS.app/Frameworks/WebRTC.framework/WebRTC."
+            exit 1
+          fi
+
           echo "Created $IPA_NAME"
           echo "Verified native Release IPA: WebRTC embedded, microphone usage present, app/dSYM UUIDs match."
 
       - name: Upload unsigned IPA artifact
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: ChitChatIOS-${{ env.SHORT_SHA }}-unsigned-ipa
@@ -168,11 +261,12 @@ jobs:
           retention-days: 14
 
       - name: Upload dSYM artifact
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: ChitChatIOS-${{ env.SHORT_SHA }}-dsym
           path: ${{ env.DSYM_ZIP_NAME }}
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 14
 
       - name: Upload build diagnostics
@@ -186,6 +280,11 @@ jobs:
             ${{ env.XCODEBUILD_LOG_NAME }}
             ${{ env.LINKED_LIBRARIES_NAME }}
             ${{ env.RPATH_LOG_NAME }}
+            ${{ env.PACKAGE_PATHS_NAME }}
+            ${{ env.FRAMEWORK_LIST_NAME }}
+            ${{ env.APP_UUID_NAME }}
+            ${{ env.DSYM_UUID_NAME }}
+            ${{ env.LIPO_INFO_NAME }}
           if-no-files-found: warn
           retention-days: 14
 
