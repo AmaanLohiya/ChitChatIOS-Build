@@ -38,8 +38,13 @@ struct MessageAttachment: Codable, Equatable {
 
     enum CodingKeys: String, CodingKey {
         case url
+        case secureUrl
         case mimeType
+        case contentType
         case fileName
+        case filename
+        case originalName
+        case name
         case size
         case fileSize
         case sizeBytes
@@ -71,9 +76,9 @@ struct MessageAttachment: Codable, Equatable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        url = try container.decode(String.self, forKey: .url)
-        mimeType = try container.decodeIfPresent(String.self, forKey: .mimeType)
-        fileName = try container.decodeIfPresent(String.self, forKey: .fileName)
+        url = try Self.firstNonEmptyString(in: container, keys: [.url, .secureUrl]) ?? ""
+        mimeType = try Self.firstNonEmptyString(in: container, keys: [.mimeType, .contentType])
+        fileName = try Self.firstNonEmptyString(in: container, keys: [.fileName, .filename, .originalName, .name])
         size = try container.decodeIfPresent(Int.self, forKey: .size)
             ?? container.decodeIfPresent(Int.self, forKey: .fileSize)
             ?? container.decodeIfPresent(Int.self, forKey: .sizeBytes)
@@ -81,6 +86,20 @@ struct MessageAttachment: Codable, Equatable {
         width = try container.decodeIfPresent(Int.self, forKey: .width)
         height = try container.decodeIfPresent(Int.self, forKey: .height)
         thumbnailUrl = try container.decodeIfPresent(String.self, forKey: .thumbnailUrl)
+    }
+
+    private static func firstNonEmptyString(
+        in container: KeyedDecodingContainer<CodingKeys>,
+        keys: [CodingKeys]
+    ) throws -> String? {
+        for key in keys {
+            let value = try container.decodeIfPresent(String.self, forKey: key)?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if let value, !value.isEmpty {
+                return value
+            }
+        }
+        return nil
     }
 
     func encode(to encoder: Encoder) throws {

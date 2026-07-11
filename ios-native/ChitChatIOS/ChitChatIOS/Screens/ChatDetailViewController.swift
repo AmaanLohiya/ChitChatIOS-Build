@@ -4,15 +4,27 @@ import UIKit
 import UniformTypeIdentifiers
 
 private enum MediaSendError: LocalizedError {
+    case selectedFileUnavailable
+    case fileCopyFailed
     case uploadFailed
     case sendFailed
+    case previewDownloadFailed
+    case cannotOpenDocument
 
     var errorDescription: String? {
         switch self {
+        case .selectedFileUnavailable:
+            return "Selected file could not be read."
+        case .fileCopyFailed:
+            return "Selected file could not be copied."
         case .uploadFailed:
             return "Upload failed. Please try again."
         case .sendFailed:
             return "Message could not be sent."
+        case .previewDownloadFailed:
+            return "Document preview could not be downloaded."
+        case .cannotOpenDocument:
+            return "Document could not be opened."
         }
     }
 }
@@ -24,6 +36,9 @@ private enum PickedMediaFile {
             prefix: "chitchat-upload",
             excluding: sourceURL
         )
+        if FileManager.default.fileExists(atPath: destination.path) {
+            try FileManager.default.removeItem(at: destination)
+        }
         try FileManager.default.copyItem(at: sourceURL, to: destination)
         try validateReadableFile(at: destination)
         return destination
@@ -41,6 +56,9 @@ private enum PickedMediaFile {
 
         coordinator.coordinate(readingItemAt: sourceURL, options: [], error: &coordinatorError) { readableURL in
             do {
+                if FileManager.default.fileExists(atPath: destination.path) {
+                    try FileManager.default.removeItem(at: destination)
+                }
                 try FileManager.default.copyItem(at: readableURL, to: destination)
             } catch {
                 copyError = error
@@ -60,7 +78,7 @@ private enum PickedMediaFile {
     static func safeFileName(_ value: String) -> String {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         let fallback = trimmed.isEmpty ? "upload" : trimmed
-        let forbidden = CharacterSet(charactersIn: "/\\:")
+        let forbidden = CharacterSet(charactersIn: "/\\:?%*|\"<>")
             .union(.newlines)
             .union(.controlCharacters)
         let cleaned = fallback.unicodeScalars
@@ -77,7 +95,7 @@ private enum PickedMediaFile {
         fallbackExtension: String,
         mimeType: String? = nil
     ) -> String {
-        let sourceName = sourceURL.lastPathComponent
+        let sourceName = displayName(for: sourceURL) ?? sourceURL.lastPathComponent
         let trimmedSuggestion = suggestedName?.trimmingCharacters(in: .whitespacesAndNewlines)
         let rawName: String
         if let resolvedSuggestion = trimmedSuggestion, !resolvedSuggestion.isEmpty {
@@ -93,6 +111,15 @@ private enum PickedMediaFile {
             return "\(safeName).\(resolvedExtension)"
         }
         return safeName
+    }
+
+    static func displayName(for url: URL) -> String? {
+        if let localizedName = try? url.resourceValues(forKeys: [.localizedNameKey]).localizedName,
+           !localizedName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return localizedName
+        }
+        let lastPathComponent = url.lastPathComponent.trimmingCharacters(in: .whitespacesAndNewlines)
+        return lastPathComponent.isEmpty ? nil : lastPathComponent
     }
 
     static func fileSize(at url: URL) -> Int? {
@@ -185,10 +212,10 @@ private enum PickedMediaFile {
 
     private static func validateReadableFile(at url: URL) throws {
         guard FileManager.default.fileExists(atPath: url.path) else {
-            throw NSError(domain: NSCocoaErrorDomain, code: NSFileReadNoSuchFileError, userInfo: nil)
+            throw MediaSendError.selectedFileUnavailable
         }
         guard FileManager.default.isReadableFile(atPath: url.path) else {
-            throw NSError(domain: NSCocoaErrorDomain, code: NSFileReadNoPermissionError, userInfo: nil)
+            throw MediaSendError.selectedFileUnavailable
         }
     }
 }
@@ -284,6 +311,7 @@ private final class ChatHeaderAvatarView: UIView {
 private final class ImagePreviewViewController: UIViewController {
     private let imageURL: URL
     private let imageView = UIImageView()
+    private let errorLabel = UILabel()
     private var imageTask: URLSessionDataTask?
 
     init(imageURL: URL) {
@@ -307,6 +335,14 @@ private final class ImagePreviewViewController: UIViewController {
         view.addSubview(imageView)
         view.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(close)))
 
+        errorLabel.translatesAutoresizingMaskIntoConstraints = false
+        errorLabel.text = "Image could not be loaded."
+        errorLabel.textColor = UIColor.white.withAlphaComponent(0.72)
+        errorLabel.font = UIFont.systemFont(ofSize: 15, weight: .semibold)
+        errorLabel.textAlignment = .center
+        errorLabel.isHidden = true
+        view.addSubview(errorLabel)
+
         let closeButton = UIButton(type: .system)
         closeButton.translatesAutoresizingMaskIntoConstraints = false
         closeButton.tintColor = .white
@@ -327,6 +363,11 @@ private final class ImagePreviewViewController: UIViewController {
             imageView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             imageView.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor),
 
+            errorLabel.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            errorLabel.centerYAnchor.constraint(equalTo: view.centerYAnchor),
+            errorLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 24),
+            errorLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -24),
+
             closeButton.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 14),
             closeButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -18),
             closeButton.widthAnchor.constraint(equalToConstant: 44),
@@ -342,9 +383,14 @@ private final class ImagePreviewViewController: UIViewController {
 
     private func loadImage() {
         imageTask = URLSession.shared.dataTask(with: imageURL) { [weak self] data, _, _ in
-            guard let data, let image = UIImage(data: data) else { return }
             DispatchQueue.main.async {
-                self?.imageView.image = image
+                guard let self else { return }
+                guard let data, let image = UIImage(data: data) else {
+                    self.errorLabel.isHidden = false
+                    return
+                }
+                self.errorLabel.isHidden = true
+                self.imageView.image = image
             }
         }
         imageTask?.resume()
@@ -960,16 +1006,30 @@ final class ChatDetailViewController: BaseViewController {
         sourceURL: URL
     ) async throws -> URL {
         if sourceURL.isFileURL {
-            return sourceURL
+            if !sourceURL.pathExtension.isEmpty {
+                return sourceURL
+            }
+            let fileName = PickedMediaFile.fileName(
+                suggestedName: attachment.fileName,
+                sourceURL: sourceURL,
+                fallbackBase: "document-\(Int(Date().timeIntervalSince1970))",
+                fallbackExtension: PickedMediaFile.preferredExtension(sourceURL: sourceURL, mimeType: attachment.mimeType),
+                mimeType: attachment.mimeType
+            )
+            return try PickedMediaFile.copyToTemporaryFile(sourceURL: sourceURL, preferredFileName: fileName)
         }
 
-        let (downloadedURL, _) = try await URLSession.shared.download(from: sourceURL)
+        let (downloadedURL, response) = try await URLSession.shared.download(from: sourceURL)
+        if let httpResponse = response as? HTTPURLResponse,
+           !(200...299).contains(httpResponse.statusCode) {
+            throw MediaSendError.previewDownloadFailed
+        }
         let fallbackExtension = PickedMediaFile.preferredExtension(
             sourceURL: sourceURL,
             mimeType: attachment.mimeType
         )
         let fileName = PickedMediaFile.fileName(
-            suggestedName: attachment.fileName,
+            suggestedName: attachment.fileName ?? response.suggestedFilename,
             sourceURL: sourceURL,
             fallbackBase: "document-\(Int(Date().timeIntervalSince1970))",
             fallbackExtension: fallbackExtension,
@@ -1004,14 +1064,23 @@ final class ChatDetailViewController: BaseViewController {
         interactionController.delegate = self
         documentInteractionController = interactionController
         if !interactionController.presentPreview(animated: true) {
-            openExternalDocumentURL(fallbackURL)
+            let presentedOptions = interactionController.presentOptionsMenu(
+                from: view.bounds,
+                in: view,
+                animated: true
+            )
+            if !presentedOptions {
+                openExternalDocumentURL(fallbackURL)
+            }
         }
     }
 
     private func openExternalDocumentURL(_ url: URL) {
-        UIApplication.shared.open(url, options: [:]) { [weak self] opened in
-            if !opened {
-                self?.showAlert(message: "Document could not be opened.")
+        DispatchQueue.main.async {
+            UIApplication.shared.open(url, options: [:]) { [weak self] opened in
+                if !opened {
+                    self?.showAlert(message: MediaSendError.cannotOpenDocument.localizedDescription)
+                }
             }
         }
     }
@@ -1322,7 +1391,7 @@ extension ChatDetailViewController: PHPickerViewControllerDelegate {
                 }
             } catch {
                 DispatchQueue.main.async {
-                    self.showAlert(message: error.localizedDescription)
+                    self.showAlert(message: MediaSendError.fileCopyFailed.localizedDescription)
                 }
             }
         }
@@ -1357,7 +1426,7 @@ extension ChatDetailViewController: UIDocumentPickerDelegate {
             )
             uploadAndSendDocument(fileURL: tempURL, fileName: fileName, mimeType: mimeType)
         } catch {
-            showAlert(message: error.localizedDescription)
+            showAlert(message: MediaSendError.fileCopyFailed.localizedDescription)
         }
     }
 }

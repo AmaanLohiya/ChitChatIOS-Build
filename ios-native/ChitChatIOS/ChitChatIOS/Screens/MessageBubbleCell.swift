@@ -11,11 +11,22 @@ private enum ChatDetailTimeFormatter {
 }
 
 private enum ChatDetailFileFormatter {
-    static func string(from value: Int?) -> String {
-        guard let value, value > 0 else { return "Unknown size" }
-        if value < 1024 { return "\(value) B" }
-        if value < 1024 * 1024 { return "\(Int(round(Double(value) / 1024))) KB" }
-        return String(format: "%.1f MB", Double(value) / Double(1024 * 1024))
+    static func string(from value: Int?) -> String? {
+        guard let value, value > 0 else { return nil }
+        let units = ["B", "KB", "MB", "GB"]
+        var size = Double(value)
+        var unitIndex = 0
+        while size >= 1024, unitIndex < units.count - 1 {
+            size /= 1024
+            unitIndex += 1
+        }
+        if unitIndex == 0 {
+            return "\(value) \(units[unitIndex])"
+        }
+        if size < 10 {
+            return String(format: "%.1f %@", size, units[unitIndex])
+        }
+        return String(format: "%.0f %@", size, units[unitIndex])
     }
 
     static func displayName(from value: String?, mimeType: String?) -> String {
@@ -45,7 +56,7 @@ private enum ChatDetailFileFormatter {
         return value
     }
 
-    private static func preferredExtension(forMimeType mimeType: String?) -> String? {
+    static func preferredExtension(forMimeType mimeType: String?) -> String? {
         switch mimeType?.lowercased() {
         case "application/pdf":
             return "pdf"
@@ -490,6 +501,7 @@ final class MessageBubbleCell: UITableViewCell {
             mimeType: attachment.mimeType
         )
         documentSizeLabel.text = ChatDetailFileFormatter.string(from: attachment.size)
+            ?? documentTypeLabel(fileName: attachment.fileName, mimeType: attachment.mimeType)
 
         activeLayoutConstraints = [
             bubbleView.widthAnchor.constraint(greaterThanOrEqualToConstant: 214),
@@ -525,6 +537,19 @@ final class MessageBubbleCell: UITableViewCell {
             readView.centerYAnchor.constraint(equalTo: documentHintLabel.centerYAnchor)
         ]
         NSLayoutConstraint.activate(activeLayoutConstraints)
+    }
+
+    private func documentTypeLabel(fileName: String?, mimeType: String?) -> String {
+        let extensionValue = fileName.flatMap {
+            URL(fileURLWithPath: $0).pathExtension.trimmingCharacters(in: .whitespacesAndNewlines)
+        } ?? ""
+        if !extensionValue.isEmpty {
+            return extensionValue.uppercased()
+        }
+        if let mimeType, let preferred = ChatDetailFileFormatter.preferredExtension(forMimeType: mimeType) {
+            return preferred.uppercased()
+        }
+        return "Document"
     }
 
     private func resetContentVisibility() {
