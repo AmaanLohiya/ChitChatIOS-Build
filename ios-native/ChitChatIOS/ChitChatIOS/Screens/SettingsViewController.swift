@@ -1,8 +1,11 @@
 import UIKit
 
 final class SettingsViewController: BaseViewController {
-    private let user: User
+    private var user: User
     private let scrollView = UIScrollView()
+    private weak var profileAvatarView: ReplicaAvatarView?
+    private weak var profileNameLabel: UILabel?
+    private weak var profileBioLabel: UILabel?
 
     init(user: User) {
         self.user = user
@@ -10,7 +13,7 @@ final class SettingsViewController: BaseViewController {
     }
 
     required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
+        return nil
     }
 
     override func viewDidLoad() {
@@ -26,6 +29,11 @@ final class SettingsViewController: BaseViewController {
         guard scrollView.contentInset.bottom != bottomClearance else { return }
         scrollView.contentInset.bottom = bottomClearance
         scrollView.scrollIndicatorInsets.bottom = bottomClearance
+    }
+
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        refreshProfileCard()
     }
 
     private func buildUI() {
@@ -121,7 +129,8 @@ final class SettingsViewController: BaseViewController {
 
         let avatar = ReplicaAvatarView()
         avatar.translatesAutoresizingMaskIntoConstraints = false
-        avatar.configure(name: user.name, urlString: user.avatarUrl)
+        avatar.configure(name: user.name, urlString: user.avatarUrl, updatedAt: user.updatedAt)
+        profileAvatarView = avatar
 
         let camera = UIImageView(image: UIImage(systemName: "camera"))
         camera.translatesAutoresizingMaskIntoConstraints = false
@@ -138,13 +147,15 @@ final class SettingsViewController: BaseViewController {
         name.text = user.name.isEmpty ? "You" : user.name
         name.textColor = UIColor(hex: "#E7EFF3")
         name.font = UIFont.systemFont(ofSize: 17, weight: .semibold)
+        profileNameLabel = name
 
         let bio = UILabel()
         bio.translatesAutoresizingMaskIntoConstraints = false
-        bio.text = user.bio.isEmpty ? "Hey there! I am using ChitChat" : user.bio
+        bio.text = user.bio.isEmpty ? "No status yet" : user.bio
         bio.textColor = ChitChatColors.textMuted
         bio.font = UIFont.systemFont(ofSize: 13)
         bio.numberOfLines = 1
+        profileBioLabel = bio
 
         let chevron = UIImageView(image: UIImage(systemName: "chevron.right"))
         chevron.translatesAutoresizingMaskIntoConstraints = false
@@ -397,7 +408,8 @@ final class SettingsViewController: BaseViewController {
     }
 
     @objc private func openProfile() {
-        navigationController?.pushViewController(ProfileViewController(user: user), animated: true)
+        let profileUser = SessionManager.shared.authenticatedUser ?? user
+        navigationController?.pushViewController(ProfileViewController(user: profileUser), animated: true)
     }
 
     @objc private func confirmLogout() {
@@ -408,8 +420,34 @@ final class SettingsViewController: BaseViewController {
         )
         alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
         alert.addAction(UIAlertAction(title: "Log out", style: .destructive) { _ in
-            SessionManager.shared.signOut()
+            Task {
+                await SessionManager.shared.logout()
+            }
         })
         present(alert, animated: true)
+    }
+
+    private func refreshProfileCard() {
+        if let authenticatedUser = SessionManager.shared.authenticatedUser {
+            user = authenticatedUser
+            applyProfileCardUser()
+        }
+
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                let refreshedUser = try await SessionManager.shared.refreshCurrentUser()
+                self.user = refreshedUser
+                self.applyProfileCardUser()
+            } catch {
+                // Keep the current profile card visible during temporary network failures.
+            }
+        }
+    }
+
+    private func applyProfileCardUser() {
+        profileAvatarView?.configure(name: user.name, urlString: user.avatarUrl, updatedAt: user.updatedAt)
+        profileNameLabel?.text = user.name.isEmpty ? "You" : user.name
+        profileBioLabel?.text = user.bio.isEmpty ? "No status yet" : user.bio
     }
 }

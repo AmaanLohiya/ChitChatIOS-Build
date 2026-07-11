@@ -30,6 +30,11 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
                     navigationController.setViewControllers([SplashViewController()], animated: false)
                 case .signedOut:
                     navigationController.setViewControllers([WelcomeViewController()], animated: true)
+                case .profileSetup(let user):
+                    navigationController.setViewControllers(
+                        [ProfileEditorViewController(user: user, mode: .setup)],
+                        animated: true
+                    )
                 case .signedIn(let user):
                     navigationController.setViewControllers([MainTabBarController(user: user)], animated: true)
                 }

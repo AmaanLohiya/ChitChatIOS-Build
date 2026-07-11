@@ -76,7 +76,7 @@ enum UploadServiceError: LocalizedError {
 }
 
 final class UploadService {
-    private let baseURL = URL(string: "http://156.67.105.161:8020")!
+    private let baseURL = APIClient.shared.resolvedURL(for: "/") ?? URL(fileURLWithPath: "/")
     private let apiClient: APIClient
     private let session: URLSession
 

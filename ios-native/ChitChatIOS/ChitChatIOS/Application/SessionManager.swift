@@ -4,10 +4,12 @@ final class SessionManager {
     enum State {
         case restoring
         case signedOut
+        case profileSetup(User)
         case signedIn(User)
     }
 
     static let shared = SessionManager()
+    static let currentUserDidChange = Notification.Name("ChitChatCurrentUserDidChange")
 
     var onStateChange: ((State) -> Void)? {
         didSet { onStateChange?(state) }
@@ -21,6 +23,8 @@ final class SessionManager {
                 if let accessToken, !accessToken.isEmpty {
                     SocketService.shared.connect(accessToken: accessToken)
                 }
+            case .profileSetup:
+                SocketService.shared.disconnect()
             case .signedOut:
                 VoiceCallService.shared.resetForSignOut()
                 SocketService.shared.disconnect()
@@ -38,6 +42,8 @@ final class SessionManager {
     private var sessionId: String?
     private var currentUser: User?
     private var refreshTask: Task<Void, Error>?
+
+    var authenticatedUser: User? { currentUser }
 
     private enum Key {
         static let accessToken = "auth.native.accessToken.v1"
@@ -84,20 +90,20 @@ final class SessionManager {
             let user = try await authService.getMe()
             try saveStoredUser(user)
             currentUser = user
-            state = .signedIn(user)
+            transition(for: user)
         } catch APIClientError.unauthorized {
             await restoreByRefreshingOrFallback()
         } catch APIClientError.server(let code, _) where code == "MISSING_AUTH_SESSION" || code == "INVALID_ACCESS_TOKEN" {
             await restoreByRefreshingOrFallback()
         } catch APIClientError.network {
             if let currentUser = currentUser {
-                state = .signedIn(currentUser)
+                transition(for: currentUser)
             } else {
                 state = .signedOut
             }
         } catch {
             if let currentUser = currentUser {
-                state = .signedIn(currentUser)
+                transition(for: currentUser)
             } else {
                 state = .signedOut
             }
@@ -120,7 +126,7 @@ final class SessionManager {
             sessionId: response.sessionId,
             user: response.user
         )
-        state = .signedIn(response.user)
+        transition(for: response.user)
     }
 
     func refreshSession() async throws {
@@ -143,7 +149,9 @@ final class SessionManager {
             if let rotated = response.refreshToken {
                 try? self.keychain.set(rotated, for: Key.refreshToken)
             }
-            SocketService.shared.connect(accessToken: response.accessToken)
+            if case .signedIn = self.state {
+                SocketService.shared.connect(accessToken: response.accessToken)
+            }
         }
 
         refreshTask = task
@@ -164,16 +172,42 @@ final class SessionManager {
         state = .signedOut
     }
 
+    func logout() async {
+        let currentSessionId = sessionId
+        do {
+            try await authService.logout(sessionId: currentSessionId)
+        } catch {
+            // Local cleanup must still complete if the session is already expired or offline.
+        }
+        signOut()
+    }
+
+    func refreshCurrentUser() async throws -> User {
+        let user = try await authService.getMe()
+        try updateAuthenticatedUser(user)
+        return user
+    }
+
+    func updateAuthenticatedUser(_ user: User, transitionToMainApp: Bool = false) throws {
+        currentUser = user
+        try saveStoredUser(user)
+        NotificationCenter.default.post(name: Self.currentUserDidChange, object: user)
+
+        if transitionToMainApp {
+            state = .signedIn(user)
+        }
+    }
+
     private func restoreByRefreshingOrFallback() async {
         do {
             try await refreshSession()
             let user = try await authService.getMe()
             try saveStoredUser(user)
-            currentUser = user
-            state = .signedIn(user)
+            try updateAuthenticatedUser(user)
+            transition(for: user)
         } catch APIClientError.network {
             if let currentUser = currentUser {
-                state = .signedIn(currentUser)
+                transition(for: currentUser)
             } else {
                 state = .signedOut
             }
@@ -203,6 +237,10 @@ final class SessionManager {
             return nil
         }
         return try? JSONDecoder().decode(User.self, from: data)
+    }
+
+    private func transition(for user: User) {
+        state = user.isProfileComplete ? .signedIn(user) : .profileSetup(user)
     }
 }
 

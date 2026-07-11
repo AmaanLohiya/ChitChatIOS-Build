@@ -71,6 +71,20 @@ struct RefreshTokenResponse: Codable {
     let refreshToken: String?
 }
 
+struct UpdateProfileRequest: Encodable {
+    let name: String?
+    let avatarUrl: String?
+    let bio: String?
+}
+
+struct LogoutRequest: Encodable {
+    let sessionId: String?
+}
+
+struct LogoutResponse: Decodable {
+    let revokedSessionId: String
+}
+
 struct AuthSession: Codable {
     let accessToken: String
     let refreshToken: String

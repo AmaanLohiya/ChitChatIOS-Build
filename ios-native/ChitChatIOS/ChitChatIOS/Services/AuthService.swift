@@ -44,6 +44,28 @@ final class AuthService {
         try await apiClient.request("/api/v1/users/me", method: .get, requiresAuth: true)
     }
 
+    func updateProfile(
+        name: String,
+        bio: String,
+        avatarUrl: String?
+    ) async throws -> User {
+        try await apiClient.request(
+            "/api/v1/users/me",
+            method: .put,
+            body: UpdateProfileRequest(name: name, avatarUrl: avatarUrl, bio: bio),
+            requiresAuth: true
+        )
+    }
+
+    func logout(sessionId: String?) async throws {
+        let _: LogoutResponse = try await apiClient.request(
+            "/api/v1/auth/logout",
+            method: .post,
+            body: LogoutRequest(sessionId: sessionId),
+            requiresAuth: true
+        )
+    }
+
     private func makeDeviceInfo() -> DeviceInfo {
         let device = UIDevice.current
         let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String

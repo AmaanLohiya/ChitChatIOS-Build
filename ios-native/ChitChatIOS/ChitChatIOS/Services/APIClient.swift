@@ -37,7 +37,14 @@ enum APIClientError: LocalizedError {
 }
 
 final class APIClient {
-    static let shared = APIClient(baseURL: URL(string: "http://156.67.105.161:8020")!)
+    private static let configuredBaseURL: URL = {
+        if let url = URL(string: "http://156.67.105.161:8020") {
+            return url
+        }
+        return URL(fileURLWithPath: "/")
+    }()
+
+    static let shared = APIClient(baseURL: configuredBaseURL)
 
     private let baseURL: URL
     private let session: URLSession
@@ -47,6 +54,20 @@ final class APIClient {
     init(baseURL: URL, session: URLSession = .shared) {
         self.baseURL = baseURL
         self.session = session
+    }
+
+    func resolvedURL(for path: String) -> URL? {
+        if let url = URL(string: path), url.scheme != nil {
+            return url
+        }
+
+        guard path.hasPrefix("/") else { return nil }
+        guard var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false) else {
+            return nil
+        }
+        components.path = path
+        components.queryItems = nil
+        return components.url
     }
 
     func request<Response: Decodable>(
