@@ -350,6 +350,16 @@ final class ChatsViewController: BaseViewController {
                 self.mergeRealtimeChat(chat)
             }
         )
+        socketObservers.append(
+            NotificationCenter.default.addObserver(
+                forName: .socketPresenceUpdated,
+                object: nil,
+                queue: .main
+            ) { [weak self] notification in
+                guard let self, let event = notification.object as? SocketPresenceEvent else { return }
+                self.mergePresence(event)
+            }
+        )
     }
 
     private func mergeRealtimeChat(_ chat: Chat) {
@@ -364,6 +374,21 @@ final class ChatsViewController: BaseViewController {
         hasLoaded = true
         applySearch()
         updateErrorBanner()
+    }
+
+    private func mergePresence(_ event: SocketPresenceEvent) {
+        var changed = false
+        chats = chats.map { chat in
+            let updated = chat.updatingPresence(
+                userId: event.userId,
+                isOnline: event.isOnline,
+                lastSeenAt: event.lastSeenAt
+            )
+            if updated != chat { changed = true }
+            return updated
+        }
+        guard changed else { return }
+        applySearch()
     }
 
     private func applySearch() {

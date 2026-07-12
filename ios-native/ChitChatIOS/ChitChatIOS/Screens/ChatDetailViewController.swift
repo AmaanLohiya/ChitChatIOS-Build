@@ -420,14 +420,20 @@ private final class DocumentPreviewDataSource: NSObject, QLPreviewControllerData
 final class ChatDetailViewController: BaseViewController {
     private static let quickReactions = ["👍", "❤️", "😂", "😮", "😢", "🙏"]
 
-    private let chat: Chat
+    private static let typingRefreshInterval: TimeInterval = 1.2
+    private static let typingInactivityInterval: TimeInterval = 2
+    private static let remoteTypingExpiryInterval: TimeInterval = 3.5
+
+    private var chat: Chat
     private let currentUser: User
+    private let chatService: ChatService
     private let messageService: MessageService
     private let uploadService: UploadService
 
     private let headerView = UIView()
     private let headerAvatar = ChatHeaderAvatarView()
     private let onlineDot = UIView()
+    private let statusLabel = UILabel()
     private let tableView = UITableView(frame: .zero, style: .plain)
     private let composerContextView = UIView()
     private let composerContextAccent = UIView()
@@ -445,6 +451,7 @@ final class ChatDetailViewController: BaseViewController {
     private var documentPreviewTask: Task<Void, Never>?
     private var actionTask: Task<Void, Never>?
     private var receiptTask: Task<Void, Never>?
+    private var presenceRefreshTask: Task<Void, Never>?
     private var documentPreviewDataSource: DocumentPreviewDataSource?
     private var documentInteractionController: UIDocumentInteractionController?
     private var composerContextHeightConstraint: NSLayoutConstraint?
@@ -457,15 +464,23 @@ final class ChatDetailViewController: BaseViewController {
     private var deletedForMeMessageIDs = Set<String>()
     private var isViewVisible = false
     private var isApplicationActive = UIApplication.shared.applicationState == .active
+    private var isLocalTyping = false
+    private var lastTypingStartAt: TimeInterval = 0
+    private var localTypingStopWorkItem: DispatchWorkItem?
+    private var typingUserIDs = Set<String>()
+    private var remoteTypingWorkItems: [String: DispatchWorkItem] = [:]
+    private var remoteTypingExpiryByUserID: [String: TimeInterval] = [:]
 
     init(
         chat: Chat,
         currentUser: User,
+        chatService: ChatService = ChatService(),
         messageService: MessageService = MessageService(),
         uploadService: UploadService = UploadService()
     ) {
         self.chat = chat
         self.currentUser = currentUser
+        self.chatService = chatService
         self.messageService = messageService
         self.uploadService = uploadService
         super.init(nibName: nil, bundle: nil)
@@ -490,6 +505,7 @@ final class ChatDetailViewController: BaseViewController {
         super.viewWillAppear(animated)
         navigationController?.setNavigationBarHidden(true, animated: false)
         SocketService.shared.joinChat(chat.id)
+        updateHeaderStatus()
     }
 
     override func viewDidAppear(_ animated: Bool) {
@@ -501,6 +517,8 @@ final class ChatDetailViewController: BaseViewController {
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
         isViewVisible = false
+        stopLocalTyping()
+        clearRemoteTypingUsers()
         receiptTask?.cancel()
         navigationController?.setNavigationBarHidden(false, animated: false)
         if isMovingFromParent || navigationController?.isBeingDismissed == true {
@@ -517,6 +535,9 @@ final class ChatDetailViewController: BaseViewController {
         documentPreviewTask?.cancel()
         actionTask?.cancel()
         receiptTask?.cancel()
+        presenceRefreshTask?.cancel()
+        localTypingStopWorkItem?.cancel()
+        remoteTypingWorkItems.values.forEach { $0.cancel() }
         headerAvatar.cancelImageLoad()
         socketObservers.forEach { NotificationCenter.default.removeObserver($0) }
         SocketService.shared.leaveChat(chat.id)
@@ -567,7 +588,6 @@ final class ChatDetailViewController: BaseViewController {
         )
         nameLabel.numberOfLines = 1
 
-        let statusLabel = UILabel()
         statusLabel.translatesAutoresizingMaskIntoConstraints = false
         statusLabel.text = headerStatus(partner: partner)
         statusLabel.font = ChitChatTypography.chatDetailStatus
@@ -707,7 +727,55 @@ final class ChatDetailViewController: BaseViewController {
         guard let lastSeenAt = partner?.lastSeenAt else {
             return "offline"
         }
-        return ChitChatDateFormatter.messageTime(from: lastSeenAt)
+        return formattedLastSeen(lastSeenAt)
+    }
+
+    private func updateHeaderStatus() {
+        let partner = chat.otherParticipant(viewerUserId: currentUser.id)?.user
+        statusLabel.text = typingSummary() ?? headerStatus(partner: partner)
+        onlineDot.isHidden = chat.type == .group || !(partner?.isOnline ?? false)
+    }
+
+    private func typingSummary() -> String? {
+        let currentUserID = normalizedUserID(currentUser.id)
+        let names = chat.members.compactMap { member -> String? in
+            let userID = normalizedUserID(member.userId)
+            guard
+                member.leftAt == nil,
+                member.deletedAt == nil,
+                userID != currentUserID,
+                typingUserIDs.contains(userID),
+                let name = member.user?.name.trimmingCharacters(in: .whitespacesAndNewlines),
+                !name.isEmpty
+            else { return nil }
+            return name
+        }
+
+        guard !names.isEmpty else { return nil }
+        if chat.type == .direct { return "typing..." }
+        if names.count == 1 { return "\(names[0]) is typing..." }
+        if names.count == 2 { return "\(names[0]) and \(names[1]) are typing..." }
+        let others = names.count - 2
+        let noun = others == 1 ? "other" : "others"
+        return "\(names[0]), \(names[1]) and \(others) \(noun) are typing..."
+    }
+
+    private func formattedLastSeen(_ rawValue: String) -> String {
+        guard let date = ChitChatDateFormatter.date(from: rawValue) else { return "offline" }
+        let calendar = Calendar.current
+        let timeFormatter = DateFormatter()
+        timeFormatter.timeStyle = .short
+        let time = timeFormatter.string(from: date)
+        if calendar.isDateInToday(date) { return "last seen today at \(time)" }
+        if calendar.isDateInYesterday(date) { return "last seen yesterday at \(time)" }
+
+        let dayFormatter = DateFormatter()
+        dayFormatter.dateFormat = "d MMM"
+        return "last seen \(dayFormatter.string(from: date)) at \(time)"
+    }
+
+    private func normalizedUserID(_ value: String) -> String {
+        value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     }
 
     private func configureTable() {
@@ -758,6 +826,9 @@ final class ChatDetailViewController: BaseViewController {
         }
         inputBar.onAttach = { [weak self] in
             self?.showAttachmentSheet()
+        }
+        inputBar.onTextChanged = { [weak self] text in
+            self?.handleInputTextChanged(text)
         }
 
         composerContextView.translatesAutoresizingMaskIntoConstraints = false
@@ -902,8 +973,142 @@ final class ChatDetailViewController: BaseViewController {
         }
     }
 
+    private func handleInputTextChanged(_ text: String) {
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            stopLocalTyping()
+            return
+        }
+
+        guard
+            isViewVisible,
+            isApplicationActive,
+            SocketService.shared.isConnected,
+            SocketService.shared.isChatJoined(chat.id)
+        else {
+            resetLocalTypingState()
+            return
+        }
+
+        let now = Date().timeIntervalSince1970
+        if !isLocalTyping || now - lastTypingStartAt >= Self.typingRefreshInterval {
+            isLocalTyping = true
+            lastTypingStartAt = now
+            SocketService.shared.startTyping(in: chat.id)
+        }
+
+        localTypingStopWorkItem?.cancel()
+        let workItem = DispatchWorkItem { [weak self] in
+            self?.stopLocalTyping()
+        }
+        localTypingStopWorkItem = workItem
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + Self.typingInactivityInterval,
+            execute: workItem
+        )
+    }
+
+    private func stopLocalTyping(emit: Bool = true) {
+        let shouldEmit = emit && isLocalTyping && SocketService.shared.isChatJoined(chat.id)
+        resetLocalTypingState()
+        if shouldEmit {
+            SocketService.shared.stopTyping(in: chat.id)
+        }
+    }
+
+    private func resetLocalTypingState() {
+        localTypingStopWorkItem?.cancel()
+        localTypingStopWorkItem = nil
+        isLocalTyping = false
+        lastTypingStartAt = 0
+    }
+
+    private func handleRemoteTypingStarted(_ event: SocketTypingEvent) {
+        let userID = normalizedUserID(event.userId)
+        guard
+            normalizedUserID(event.chatId) == normalizedUserID(chat.id),
+            userID != normalizedUserID(currentUser.id),
+            chat.members.contains(where: {
+                normalizedUserID($0.userId) == userID && $0.leftAt == nil && $0.deletedAt == nil
+            })
+        else { return }
+
+        typingUserIDs.insert(userID)
+        remoteTypingWorkItems[userID]?.cancel()
+        let expiry = Date().timeIntervalSince1970 + Self.remoteTypingExpiryInterval
+        let workItem = DispatchWorkItem { [weak self] in
+            guard self?.remoteTypingExpiryByUserID[userID] == expiry else { return }
+            self?.removeRemoteTypingUser(userID)
+        }
+        remoteTypingExpiryByUserID[userID] = expiry
+        remoteTypingWorkItems[userID] = workItem
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + Self.remoteTypingExpiryInterval,
+            execute: workItem
+        )
+        updateHeaderStatus()
+    }
+
+    private func handleRemoteTypingStopped(_ event: SocketTypingEvent) {
+        guard normalizedUserID(event.chatId) == normalizedUserID(chat.id) else { return }
+        removeRemoteTypingUser(event.userId)
+    }
+
+    private func removeRemoteTypingUser(_ userId: String) {
+        let userID = normalizedUserID(userId)
+        remoteTypingWorkItems[userID]?.cancel()
+        remoteTypingWorkItems.removeValue(forKey: userID)
+        remoteTypingExpiryByUserID.removeValue(forKey: userID)
+        guard typingUserIDs.remove(userID) != nil else { return }
+        updateHeaderStatus()
+    }
+
+    private func clearRemoteTypingUsers() {
+        remoteTypingWorkItems.values.forEach { $0.cancel() }
+        remoteTypingWorkItems.removeAll()
+        remoteTypingExpiryByUserID.removeAll()
+        guard !typingUserIDs.isEmpty else { return }
+        typingUserIDs.removeAll()
+        updateHeaderStatus()
+    }
+
+    private func handlePresenceUpdated(_ event: SocketPresenceEvent) {
+        let updatedChat = chat.updatingPresence(
+            userId: event.userId,
+            isOnline: event.isOnline,
+            lastSeenAt: event.lastSeenAt
+        )
+        if updatedChat != chat {
+            chat = updatedChat
+        }
+        if !event.isOnline {
+            removeRemoteTypingUser(event.userId)
+        }
+        updateHeaderStatus()
+    }
+
+    private func refreshChatPresence() {
+        presenceRefreshTask?.cancel()
+        presenceRefreshTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                let refreshedChat = try await chatService.getChat(id: chat.id)
+                guard !Task.isCancelled else { return }
+                await MainActor.run {
+                    self.chat = refreshedChat
+                    self.presenceRefreshTask = nil
+                    self.updateHeaderStatus()
+                }
+            } catch {
+                await MainActor.run {
+                    self.presenceRefreshTask = nil
+                }
+            }
+        }
+    }
+
     private func sendMessage(_ text: String) {
         guard sendTask == nil, mediaTask == nil else { return }
+        stopLocalTyping()
         if let editingMessageID {
             sendEditedMessage(messageID: editingMessageID, text: text)
             return
@@ -1666,6 +1871,7 @@ final class ChatDetailViewController: BaseViewController {
 
     @objc private func cancelComposerContext() {
         guard sendTask == nil, mediaTask == nil else { return }
+        stopLocalTyping()
         clearComposerContextState(restoreDraft: true)
     }
 
@@ -1895,16 +2101,62 @@ final class ChatDetailViewController: BaseViewController {
         }
 
         socketObservers.append(
+            center.addObserver(forName: .socketTypingStarted, object: nil, queue: .main) {
+                [weak self] notification in
+                guard let event = notification.object as? SocketTypingEvent else { return }
+                self?.handleRemoteTypingStarted(event)
+            }
+        )
+        socketObservers.append(
+            center.addObserver(forName: .socketTypingStopped, object: nil, queue: .main) {
+                [weak self] notification in
+                guard let event = notification.object as? SocketTypingEvent else { return }
+                self?.handleRemoteTypingStopped(event)
+            }
+        )
+        socketObservers.append(
+            center.addObserver(forName: .socketPresenceUpdated, object: nil, queue: .main) {
+                [weak self] notification in
+                guard let event = notification.object as? SocketPresenceEvent else { return }
+                self?.handlePresenceUpdated(event)
+            }
+        )
+        socketObservers.append(
+            center.addObserver(forName: .socketConnected, object: nil, queue: .main) {
+                [weak self] _ in
+                guard let self else { return }
+                self.clearRemoteTypingUsers()
+                if self.isViewVisible {
+                    SocketService.shared.joinChat(self.chat.id)
+                }
+                self.refreshChatPresence()
+            }
+        )
+        socketObservers.append(
+            center.addObserver(forName: .socketDisconnected, object: nil, queue: .main) {
+                [weak self] _ in
+                self?.stopLocalTyping(emit: false)
+                self?.clearRemoteTypingUsers()
+            }
+        )
+
+        socketObservers.append(
             center.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) {
                 [weak self] _ in
-                self?.isApplicationActive = true
-                self?.markVisibleIncomingMessagesRead()
+                guard let self else { return }
+                self.isApplicationActive = true
+                self.clearRemoteTypingUsers()
+                SocketService.shared.joinChat(self.chat.id)
+                self.refreshChatPresence()
+                self.markVisibleIncomingMessagesRead()
             }
         )
         socketObservers.append(
             center.addObserver(forName: UIApplication.willResignActiveNotification, object: nil, queue: .main) {
                 [weak self] _ in
                 self?.isApplicationActive = false
+                self?.stopLocalTyping()
+                self?.clearRemoteTypingUsers()
                 self?.receiptTask?.cancel()
             }
         )

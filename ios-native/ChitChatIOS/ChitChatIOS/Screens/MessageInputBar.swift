@@ -7,6 +7,7 @@ final class MessageInputBar: UIView, UITextFieldDelegate {
 
     var onSend: ((String) -> Void)?
     var onAttach: (() -> Void)?
+    var onTextChanged: ((String) -> Void)?
 
     var currentText: String {
         textField.text ?? ""
@@ -188,6 +189,7 @@ final class MessageInputBar: UIView, UITextFieldDelegate {
 
     @objc private func textChanged() {
         updateState()
+        onTextChanged?(textField.text ?? "")
     }
 
     private func updateState() {

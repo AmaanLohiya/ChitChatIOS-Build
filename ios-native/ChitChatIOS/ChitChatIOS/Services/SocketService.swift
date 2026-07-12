@@ -70,6 +70,8 @@ final class SocketService {
     private var socket: SocketIOClient?
     private var activeToken: String?
     private var desiredChatIDs = Set<String>()
+    private var joinedChatIDs = Set<String>()
+    private var joiningChatIDs = Set<String>()
     private var accessTokenProvider: (() -> String?)?
     private var authenticationRecovery: (() async -> Bool)?
     private var isRecoveringAuthentication = false
@@ -151,25 +153,43 @@ final class SocketService {
         DispatchQueue.main.async {
             self.desiredChatIDs.insert(chatId)
             guard self.isConnected else { return }
-            self.emitAcknowledged("chat:join", payload: ["chatId": chatId])
+            self.joinDesiredChat(chatId)
         }
     }
 
     func leaveChat(_ chatId: String) {
         guard !chatId.isEmpty else { return }
         DispatchQueue.main.async {
+            let wasDesired = self.desiredChatIDs.contains(chatId)
+            let wasJoined = self.joinedChatIDs.contains(chatId)
+            let wasJoining = self.joiningChatIDs.contains(chatId)
+            if self.isConnected, wasJoined {
+                self.emitAcknowledged("typing:stop", payload: ["chatId": chatId])
+            }
             self.desiredChatIDs.remove(chatId)
-            guard self.isConnected else { return }
+            self.joinedChatIDs.remove(chatId)
+            self.joiningChatIDs.remove(chatId)
+            guard self.isConnected, wasDesired || wasJoined || wasJoining else { return }
             self.emitAcknowledged("chat:leave", payload: ["chatId": chatId])
         }
     }
 
     func startTyping(in chatId: String) {
-        emitIfConnected("typing:start", payload: ["chatId": chatId])
+        DispatchQueue.main.async {
+            guard self.isConnected, self.joinedChatIDs.contains(chatId) else { return }
+            self.emitAcknowledged("typing:start", payload: ["chatId": chatId])
+        }
     }
 
     func stopTyping(in chatId: String) {
-        emitIfConnected("typing:stop", payload: ["chatId": chatId])
+        DispatchQueue.main.async {
+            guard self.isConnected, self.joinedChatIDs.contains(chatId) else { return }
+            self.emitAcknowledged("typing:stop", payload: ["chatId": chatId])
+        }
+    }
+
+    func isChatJoined(_ chatId: String) -> Bool {
+        isConnected && joinedChatIDs.contains(chatId)
     }
 
     func markRead(chatId: String, messageId: String) async throws -> Message {
@@ -372,16 +392,20 @@ final class SocketService {
         socket.on(clientEvent: .connect) { [weak self] _, _ in
             guard let self else { return }
             self.isConnected = true
+            self.joinedChatIDs.removeAll()
+            self.joiningChatIDs.removeAll()
             self.debug("connected")
-            self.notificationCenter.post(name: .socketConnected, object: nil)
             self.desiredChatIDs.forEach {
-                self.emitAcknowledged("chat:join", payload: ["chatId": $0])
+                self.joinDesiredChat($0)
             }
+            self.notificationCenter.post(name: .socketConnected, object: nil)
         }
 
         socket.on(clientEvent: .disconnect) { [weak self] _, _ in
             guard let self else { return }
             self.isConnected = false
+            self.joinedChatIDs.removeAll()
+            self.joiningChatIDs.removeAll()
             self.debug("disconnected")
             self.notificationCenter.post(name: .socketDisconnected, object: nil)
         }
@@ -567,22 +591,36 @@ final class SocketService {
         }
     }
 
-    private func emitIfConnected(_ event: String, payload: [String: Any]) {
-        DispatchQueue.main.async {
-            guard self.isConnected else { return }
-            self.emitAcknowledged(event, payload: payload)
+    private func joinDesiredChat(_ chatId: String) {
+        guard
+            isConnected,
+            !joinedChatIDs.contains(chatId),
+            !joiningChatIDs.contains(chatId)
+        else { return }
+        joiningChatIDs.insert(chatId)
+        emitAcknowledged("chat:join", payload: ["chatId": chatId]) { [weak self] succeeded in
+            guard let self else { return }
+            self.joiningChatIDs.remove(chatId)
+            guard self.isConnected, succeeded, self.desiredChatIDs.contains(chatId) else { return }
+            self.joinedChatIDs.insert(chatId)
         }
     }
 
-    private func emitAcknowledged(_ event: String, payload: [String: Any]) {
+    private func emitAcknowledged(
+        _ event: String,
+        payload: [String: Any],
+        completion: ((Bool) -> Void)? = nil
+    ) {
         guard let socket, isConnected else { return }
         socket.emitWithAck(event, payload).timingOut(after: 8) { [weak self] data in
             guard let self else { return }
             do {
                 _ = try self.parseAcknowledgement(data)
                 self.debug("\(event) acknowledged")
+                completion?(true)
             } catch {
                 self.debug("\(event) failed")
+                completion?(false)
             }
         }
     }
@@ -682,6 +720,8 @@ final class SocketService {
 
     private func teardown(clearRooms: Bool, clearToken: Bool) {
         isConnected = false
+        joinedChatIDs.removeAll()
+        joiningChatIDs.removeAll()
         socket?.removeAllHandlers()
         socket?.disconnect()
         manager?.disconnect()

@@ -12,6 +12,17 @@ struct ChatMemberUser: Codable, Equatable {
     let bio: String
     let isOnline: Bool
     let lastSeenAt: String?
+
+    func updatingPresence(isOnline: Bool, lastSeenAt: String?) -> ChatMemberUser {
+        ChatMemberUser(
+            id: id,
+            name: name,
+            avatarUrl: avatarUrl,
+            bio: bio,
+            isOnline: isOnline,
+            lastSeenAt: lastSeenAt ?? self.lastSeenAt
+        )
+    }
 }
 
 struct ChatParticipant: Codable, Equatable {
@@ -24,6 +35,21 @@ struct ChatParticipant: Codable, Equatable {
     let isPinned: Bool
     let deletedAt: String?
     let user: ChatMemberUser?
+
+    func updatingPresence(userId: String, isOnline: Bool, lastSeenAt: String?) -> ChatParticipant {
+        guard self.userId.normalizedID == userId.normalizedID, let user else { return self }
+        return ChatParticipant(
+            userId: self.userId,
+            role: role,
+            joinedAt: joinedAt,
+            leftAt: leftAt,
+            mutedUntil: mutedUntil,
+            isArchived: isArchived,
+            isPinned: isPinned,
+            deletedAt: deletedAt,
+            user: user.updatingPresence(isOnline: isOnline, lastSeenAt: lastSeenAt)
+        )
+    }
 }
 
 struct Chat: Codable, Equatable {
@@ -62,6 +88,30 @@ struct Chat: Codable, Equatable {
         }
         return otherParticipant(viewerUserId: viewerUserId)?.user?.avatarUrl ?? avatarUrl
     }
+
+    func updatingPresence(userId: String, isOnline: Bool, lastSeenAt: String?) -> Chat {
+        let updatedMembers = members.map {
+            $0.updatingPresence(userId: userId, isOnline: isOnline, lastSeenAt: lastSeenAt)
+        }
+        guard updatedMembers != members else { return self }
+        return Chat(
+            id: id,
+            type: type,
+            name: name,
+            avatarUrl: avatarUrl,
+            members: updatedMembers,
+            createdBy: createdBy,
+            lastMessageId: lastMessageId,
+            lastMessagePreview: lastMessagePreview,
+            lastMessageAt: lastMessageAt,
+            isMuted: isMuted,
+            mutedUntil: mutedUntil,
+            isPinned: isPinned,
+            isArchived: isArchived,
+            createdAt: createdAt,
+            updatedAt: updatedAt
+        )
+    }
 }
 
 struct CreateDirectChatRequest: Encodable {
@@ -80,5 +130,9 @@ private extension String {
     var nonEmpty: String? {
         let value = trimmingCharacters(in: .whitespacesAndNewlines)
         return value.isEmpty ? nil : value
+    }
+
+    var normalizedID: String {
+        trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     }
 }
