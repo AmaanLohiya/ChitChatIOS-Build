@@ -78,7 +78,7 @@ final class ChatsViewController: BaseViewController {
         let editAction = makeHeaderButton(
             symbol: "square.and.pencil",
             accessibilityLabel: "Start a new chat",
-            action: #selector(startNewChat)
+            action: #selector(startNewChat(_:))
         )
         let moreAction = makeHeaderButton(
             symbol: "ellipsis",
@@ -443,8 +443,33 @@ final class ChatsViewController: BaseViewController {
         searchField.becomeFirstResponder()
     }
 
-    @objc private func startNewChat() {
-        tabBarController?.selectedIndex = 1
+    @objc private func startNewChat(_ sender: UIButton) {
+        guard presentedViewController == nil else { return }
+
+        let sheet = UIAlertController(title: "Start a chat", message: nil, preferredStyle: .actionSheet)
+        sheet.addAction(UIAlertAction(title: "New chat", style: .default) { [weak self] _ in
+            self?.tabBarController?.selectedIndex = 1
+        })
+        sheet.addAction(UIAlertAction(title: "New group", style: .default) { [weak self] _ in
+            self?.openGroupCreation()
+        })
+        sheet.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        if let popover = sheet.popoverPresentationController {
+            popover.sourceView = sender
+            popover.sourceRect = sender.bounds
+        }
+        present(sheet, animated: true)
+    }
+
+    private func openGroupCreation() {
+        guard let navigationController else { return }
+        let controller = GroupMemberSelectionViewController(
+            currentUser: currentUser,
+            chatService: chatService
+        ) { [weak self] chat in
+            self?.mergeRealtimeChat(chat)
+        }
+        navigationController.pushViewController(controller, animated: true)
     }
 
     @objc private func openChatsMenu() {

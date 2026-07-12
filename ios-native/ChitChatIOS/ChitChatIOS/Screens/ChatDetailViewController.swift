@@ -564,6 +564,8 @@ final class ChatDetailViewController: BaseViewController {
             accessibilityLabel: "Voice call"
         )
         phoneButton.addTarget(self, action: #selector(startVoiceCall), for: .touchUpInside)
+        videoButton.isHidden = chat.type == .group
+        phoneButton.isHidden = chat.type == .group
         let moreButton = makeHeaderAction(
             symbol: "ellipsis",
             color: ChitChatColors.textMuted,
@@ -665,7 +667,10 @@ final class ChatDetailViewController: BaseViewController {
 
     private func headerStatus(partner: ChatMemberUser?) -> String {
         if chat.type == .group {
-            return "\(chat.members.count) members"
+            let activeMemberCount = chat.members.filter {
+                $0.leftAt == nil && $0.deletedAt == nil
+            }.count
+            return "\(activeMemberCount) members"
         }
         if partner?.isOnline == true {
             return "online"

@@ -53,6 +53,7 @@
 		F60000000000000000000004 /* VoiceCallViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = F60000000000000000000024 /* VoiceCallViewController.swift */; };
 		F60000000000000000000005 /* WebRTC in Frameworks */ = {isa = PBXBuildFile; productRef = F60000000000000000000031 /* WebRTC */; };
 		F60000000000000000000006 /* CallAudioRouteManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = F60000000000000000000025 /* CallAudioRouteManager.swift */; };
+		G70000000000000000000001 /* GroupCreationViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = G70000000000000000000021 /* GroupCreationViewController.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -102,6 +103,7 @@
 		F60000000000000000000023 /* VoiceCallService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceCallService.swift; sourceTree = "<group>"; };
 		F60000000000000000000024 /* VoiceCallViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceCallViewController.swift; sourceTree = "<group>"; };
 		F60000000000000000000025 /* CallAudioRouteManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallAudioRouteManager.swift; sourceTree = "<group>"; };
+		G70000000000000000000021 /* GroupCreationViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GroupCreationViewController.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -210,6 +212,7 @@
 				C30000000000000000000023 /* UpdatesViewController.swift */,
 				C30000000000000000000024 /* CallsViewController.swift */,
 				F60000000000000000000024 /* VoiceCallViewController.swift */,
+				G70000000000000000000021 /* GroupCreationViewController.swift */,
 			);
 			path = Screens;
 			sourceTree = "<group>";
@@ -345,6 +348,7 @@
 				F60000000000000000000006 /* CallAudioRouteManager.swift in Sources */,
 				F60000000000000000000003 /* VoiceCallService.swift in Sources */,
 				F60000000000000000000004 /* VoiceCallViewController.swift in Sources */,
+				G70000000000000000000001 /* GroupCreationViewController.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

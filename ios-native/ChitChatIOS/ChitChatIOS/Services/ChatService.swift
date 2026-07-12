@@ -22,4 +22,20 @@ final class ChatService {
             body: CreateDirectChatRequest(participantIds: [participantUserId])
         )
     }
+
+    func createGroupChat(
+        name: String,
+        participantUserIds: [String],
+        avatarUrl: String? = nil
+    ) async throws -> Chat {
+        try await apiClient.request(
+            "/api/v1/chats",
+            method: .post,
+            body: CreateGroupChatRequest(
+                participantIds: participantUserIds,
+                name: name,
+                avatarUrl: avatarUrl
+            )
+        )
+    }
 }

@@ -69,6 +69,13 @@ struct CreateDirectChatRequest: Encodable {
     let participantIds: [String]
 }
 
+struct CreateGroupChatRequest: Encodable {
+    let type = ChatType.group
+    let participantIds: [String]
+    let name: String
+    let avatarUrl: String?
+}
+
 private extension String {
     var nonEmpty: String? {
         let value = trimmingCharacters(in: .whitespacesAndNewlines)
