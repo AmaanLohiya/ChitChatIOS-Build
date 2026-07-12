@@ -194,4 +194,29 @@ struct CreateMessageRequest: Encodable {
     let type: MessageType
     let text: String?
     let attachments: [MessageAttachment]?
+    let replyToMessageId: String?
+
+    init(
+        type: MessageType,
+        text: String?,
+        attachments: [MessageAttachment]?,
+        replyToMessageId: String? = nil
+    ) {
+        self.type = type
+        self.text = text
+        self.attachments = attachments
+        self.replyToMessageId = replyToMessageId
+    }
+}
+
+struct EditMessageRequest: Encodable {
+    let text: String
+}
+
+struct DeleteMessageRequest: Encodable {
+    let forEveryone: Bool
+}
+
+struct MessageReactionRequest: Encodable {
+    let emoji: String
 }

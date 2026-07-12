@@ -183,8 +183,53 @@ final class SocketService {
             chatId: chatId,
             type: .text,
             text: text,
-            attachments: nil
+            attachments: nil,
+            replyToMessageId: nil
         )
+    }
+
+    func editMessage(chatId: String, messageId: String, text: String) async throws -> Message {
+        let response = try await emitAcknowledgedResponse(
+            "message:edit",
+            payload: ["chatId": chatId, "messageId": messageId, "text": text],
+            timeout: 8
+        )
+        return try Self.message(fromAcknowledgement: response)
+    }
+
+    func deleteMessage(
+        chatId: String,
+        messageId: String,
+        forEveryone: Bool
+    ) async throws -> Message {
+        let response = try await emitAcknowledgedResponse(
+            "message:delete",
+            payload: [
+                "chatId": chatId,
+                "messageId": messageId,
+                "forEveryone": forEveryone
+            ],
+            timeout: 8
+        )
+        return try Self.message(fromAcknowledgement: response)
+    }
+
+    func addReaction(chatId: String, messageId: String, emoji: String) async throws -> Message {
+        let response = try await emitAcknowledgedResponse(
+            "message:reaction:add",
+            payload: ["chatId": chatId, "messageId": messageId, "emoji": emoji],
+            timeout: 8
+        )
+        return try Self.message(fromAcknowledgement: response)
+    }
+
+    func removeReaction(chatId: String, messageId: String) async throws -> Message {
+        let response = try await emitAcknowledgedResponse(
+            "message:reaction:remove",
+            payload: ["chatId": chatId, "messageId": messageId],
+            timeout: 8
+        )
+        return try Self.message(fromAcknowledgement: response)
     }
 
     func sendCallOffer(chatId: String, calleeId: String, offer: [String: Any]) async throws -> VoiceCall {
@@ -250,13 +295,15 @@ final class SocketService {
         chatId: String,
         type: MessageType,
         text: String? = nil,
-        attachments: [MessageAttachment]? = nil
+        attachments: [MessageAttachment]? = nil,
+        replyToMessageId: String? = nil
     ) async throws -> Message {
         let payload = try Self.messagePayload(
             chatId: chatId,
             type: type,
             text: text,
-            attachments: attachments
+            attachments: attachments,
+            replyToMessageId: replyToMessageId
         )
 
         return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Message, Error>) in
@@ -269,13 +316,7 @@ final class SocketService {
                 socket.emitWithAck("message:send", payload).timingOut(after: 8) { data in
                     do {
                         let response = try self.parseAcknowledgement(data)
-                        guard
-                            let responseData = response["data"] as? [String: Any],
-                            let messageValue = responseData["message"],
-                            let message = Self.decode(Message.self, from: messageValue)
-                        else {
-                            throw SocketServiceError.invalidPayload
-                        }
+                        let message = try Self.message(fromAcknowledgement: response)
                         self.debug("message:send acknowledged", id: message.id)
                         continuation.resume(returning: message)
                     } catch {
@@ -291,7 +332,8 @@ final class SocketService {
         chatId: String,
         type: MessageType,
         text: String?,
-        attachments: [MessageAttachment]?
+        attachments: [MessageAttachment]?,
+        replyToMessageId: String?
     ) throws -> [String: Any] {
         var payload: [String: Any] = [
             "chatId": chatId,
@@ -305,6 +347,10 @@ final class SocketService {
         if let attachments, !attachments.isEmpty {
             let data = try JSONEncoder().encode(attachments)
             payload["attachments"] = try JSONSerialization.jsonObject(with: data)
+        }
+
+        if let replyToMessageId, !replyToMessageId.isEmpty {
+            payload["replyToMessageId"] = replyToMessageId
         }
 
         return payload
@@ -591,6 +637,17 @@ final class SocketService {
             throw SocketServiceError.invalidPayload
         }
         return call
+    }
+
+    private static func message(fromAcknowledgement response: [String: Any]) throws -> Message {
+        guard
+            let responseData = response["data"] as? [String: Any],
+            let messageValue = responseData["message"],
+            let message = decode(Message.self, from: messageValue)
+        else {
+            throw SocketServiceError.invalidPayload
+        }
+        return message
     }
 
     private func handleAuthenticationError() {

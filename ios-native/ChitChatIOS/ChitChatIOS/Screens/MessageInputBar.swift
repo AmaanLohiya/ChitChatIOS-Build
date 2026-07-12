@@ -8,13 +8,17 @@ final class MessageInputBar: UIView, UITextFieldDelegate {
     var onSend: ((String) -> Void)?
     var onAttach: (() -> Void)?
 
+    var currentText: String {
+        textField.text ?? ""
+    }
+
     override init(frame: CGRect) {
         super.init(frame: frame)
         buildUI()
     }
 
     required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
+        return nil
     }
 
     private func buildUI() {
@@ -176,6 +180,10 @@ final class MessageInputBar: UIView, UITextFieldDelegate {
     func restoreText(_ text: String) {
         textField.text = text
         updateState()
+    }
+
+    func focusTextInput() {
+        textField.becomeFirstResponder()
     }
 
     @objc private func textChanged() {

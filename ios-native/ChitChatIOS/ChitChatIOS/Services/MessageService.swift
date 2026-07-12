@@ -40,4 +40,43 @@ final class MessageService {
             body: request
         )
     }
+
+    func editMessage(chatId: String, messageId: String, text: String) async throws -> Message {
+        try await apiClient.request(
+            "/api/v1/chats/\(chatId)/messages/\(messageId)",
+            method: .put,
+            body: EditMessageRequest(text: text)
+        )
+    }
+
+    func deleteMessage(
+        chatId: String,
+        messageId: String,
+        forEveryone: Bool
+    ) async throws -> Message {
+        try await apiClient.request(
+            "/api/v1/chats/\(chatId)/messages/\(messageId)",
+            method: .delete,
+            body: DeleteMessageRequest(forEveryone: forEveryone)
+        )
+    }
+
+    func addReaction(
+        chatId: String,
+        messageId: String,
+        emoji: String
+    ) async throws -> Message {
+        try await apiClient.request(
+            "/api/v1/chats/\(chatId)/messages/\(messageId)/reactions",
+            method: .post,
+            body: MessageReactionRequest(emoji: emoji)
+        )
+    }
+
+    func removeReaction(chatId: String, messageId: String) async throws -> Message {
+        try await apiClient.request(
+            "/api/v1/chats/\(chatId)/messages/\(messageId)/reactions",
+            method: .delete
+        )
+    }
 }

@@ -418,6 +418,8 @@ private final class DocumentPreviewDataSource: NSObject, QLPreviewControllerData
 }
 
 final class ChatDetailViewController: BaseViewController {
+    private static let quickReactions = ["👍", "❤️", "😂", "😮", "😢", "🙏"]
+
     private let chat: Chat
     private let currentUser: User
     private let messageService: MessageService
@@ -427,6 +429,11 @@ final class ChatDetailViewController: BaseViewController {
     private let headerAvatar = ChatHeaderAvatarView()
     private let onlineDot = UIView()
     private let tableView = UITableView(frame: .zero, style: .plain)
+    private let composerContextView = UIView()
+    private let composerContextAccent = UIView()
+    private let composerContextTitle = UILabel()
+    private let composerContextSummary = UILabel()
+    private let composerContextCloseButton = UIButton(type: .system)
     private let inputBar = MessageInputBar()
 
     private var stateOverlay: UIView?
@@ -436,8 +443,13 @@ final class ChatDetailViewController: BaseViewController {
     private var sendTask: Task<Void, Never>?
     private var mediaTask: Task<Void, Never>?
     private var documentPreviewTask: Task<Void, Never>?
+    private var actionTask: Task<Void, Never>?
     private var documentPreviewDataSource: DocumentPreviewDataSource?
     private var documentInteractionController: UIDocumentInteractionController?
+    private var composerContextHeightConstraint: NSLayoutConstraint?
+    private var replyToMessageID: String?
+    private var editingMessageID: String?
+    private var composerDraftBeforeEdit: String?
     private var hasLoaded = false
     private var socketObservers: [NSObjectProtocol] = []
 
@@ -479,6 +491,8 @@ final class ChatDetailViewController: BaseViewController {
         super.viewWillDisappear(animated)
         navigationController?.setNavigationBarHidden(false, animated: false)
         if isMovingFromParent || navigationController?.isBeingDismissed == true {
+            actionTask?.cancel()
+            actionTask = nil
             SocketService.shared.leaveChat(chat.id)
         }
     }
@@ -488,6 +502,7 @@ final class ChatDetailViewController: BaseViewController {
         sendTask?.cancel()
         mediaTask?.cancel()
         documentPreviewTask?.cancel()
+        actionTask?.cancel()
         headerAvatar.cancelImageLoad()
         socketObservers.forEach { NotificationCenter.default.removeObserver($0) }
         SocketService.shared.leaveChat(chat.id)
@@ -703,6 +718,13 @@ final class ChatDetailViewController: BaseViewController {
             MessageBubbleCell.self,
             forCellReuseIdentifier: MessageBubbleCell.reuseIdentifier
         )
+        let longPress = UILongPressGestureRecognizer(
+            target: self,
+            action: #selector(handleMessageLongPress(_:))
+        )
+        longPress.minimumPressDuration = 0.45
+        longPress.cancelsTouchesInView = true
+        tableView.addGestureRecognizer(longPress)
 
         let wallpaper = UIView()
         wallpaper.backgroundColor = ChitChatColors.chatDetailWallpaperOverlay
@@ -723,9 +745,87 @@ final class ChatDetailViewController: BaseViewController {
         inputBar.onAttach = { [weak self] in
             self?.showAttachmentSheet()
         }
+
+        composerContextView.translatesAutoresizingMaskIntoConstraints = false
+        composerContextView.backgroundColor = ChitChatColors.chatDetailHeader
+        composerContextView.clipsToBounds = true
+        composerContextView.isHidden = true
+
+        composerContextAccent.translatesAutoresizingMaskIntoConstraints = false
+        composerContextAccent.backgroundColor = ChitChatColors.accent
+        composerContextAccent.layer.cornerRadius = 1.5
+
+        composerContextTitle.translatesAutoresizingMaskIntoConstraints = false
+        composerContextTitle.font = UIFont.systemFont(ofSize: 12, weight: .semibold)
+        composerContextTitle.textColor = ChitChatColors.accent
+        composerContextTitle.numberOfLines = 1
+
+        composerContextSummary.translatesAutoresizingMaskIntoConstraints = false
+        composerContextSummary.font = UIFont.systemFont(ofSize: 12, weight: .regular)
+        composerContextSummary.textColor = ChitChatColors.textMuted
+        composerContextSummary.numberOfLines = 1
+
+        composerContextCloseButton.translatesAutoresizingMaskIntoConstraints = false
+        composerContextCloseButton.tintColor = ChitChatColors.textMuted
+        composerContextCloseButton.accessibilityLabel = "Cancel message action"
+        composerContextCloseButton.setImage(
+            UIImage(
+                systemName: "xmark",
+                withConfiguration: UIImage.SymbolConfiguration(pointSize: 15, weight: .semibold)
+            ),
+            for: .normal
+        )
+        composerContextCloseButton.addTarget(
+            self,
+            action: #selector(cancelComposerContext),
+            for: .touchUpInside
+        )
+
+        view.addSubview(composerContextView)
         view.addSubview(inputBar)
+        composerContextView.addSubview(composerContextAccent)
+        composerContextView.addSubview(composerContextTitle)
+        composerContextView.addSubview(composerContextSummary)
+        composerContextView.addSubview(composerContextCloseButton)
+
+        let contextHeight = composerContextView.heightAnchor.constraint(equalToConstant: 0)
+        composerContextHeightConstraint = contextHeight
 
         NSLayoutConstraint.activate([
+            composerContextView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            composerContextView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            composerContextView.bottomAnchor.constraint(equalTo: inputBar.topAnchor),
+            contextHeight,
+
+            composerContextAccent.leadingAnchor.constraint(equalTo: composerContextView.leadingAnchor, constant: 18),
+            composerContextAccent.centerYAnchor.constraint(equalTo: composerContextView.centerYAnchor),
+            composerContextAccent.widthAnchor.constraint(equalToConstant: 3),
+            composerContextAccent.heightAnchor.constraint(equalToConstant: 38),
+
+            composerContextCloseButton.trailingAnchor.constraint(
+                equalTo: composerContextView.trailingAnchor,
+                constant: -14
+            ),
+            composerContextCloseButton.centerYAnchor.constraint(equalTo: composerContextView.centerYAnchor),
+            composerContextCloseButton.widthAnchor.constraint(equalToConstant: 36),
+            composerContextCloseButton.heightAnchor.constraint(equalToConstant: 36),
+
+            composerContextTitle.topAnchor.constraint(equalTo: composerContextView.topAnchor, constant: 8),
+            composerContextTitle.leadingAnchor.constraint(equalTo: composerContextAccent.trailingAnchor, constant: 10),
+            composerContextTitle.trailingAnchor.constraint(
+                lessThanOrEqualTo: composerContextCloseButton.leadingAnchor,
+                constant: -8
+            ),
+            composerContextTitle.heightAnchor.constraint(equalToConstant: 16),
+
+            composerContextSummary.topAnchor.constraint(equalTo: composerContextTitle.bottomAnchor),
+            composerContextSummary.leadingAnchor.constraint(equalTo: composerContextTitle.leadingAnchor),
+            composerContextSummary.trailingAnchor.constraint(
+                lessThanOrEqualTo: composerContextCloseButton.leadingAnchor,
+                constant: -8
+            ),
+            composerContextSummary.heightAnchor.constraint(equalToConstant: 16),
+
             inputBar.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             inputBar.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             inputBar.bottomAnchor.constraint(equalTo: view.keyboardLayoutGuide.topAnchor),
@@ -733,7 +833,7 @@ final class ChatDetailViewController: BaseViewController {
             tableView.topAnchor.constraint(equalTo: headerView.bottomAnchor),
             tableView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             tableView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            tableView.bottomAnchor.constraint(equalTo: inputBar.topAnchor)
+            tableView.bottomAnchor.constraint(equalTo: composerContextView.topAnchor)
         ])
     }
 
@@ -787,18 +887,30 @@ final class ChatDetailViewController: BaseViewController {
 
     private func sendMessage(_ text: String) {
         guard sendTask == nil, mediaTask == nil else { return }
+        if let editingMessageID {
+            sendEditedMessage(messageID: editingMessageID, text: text)
+            return
+        }
+
+        let replyMessageID = replyToMessageID
         inputBar.setSending(true)
 
         sendTask = Task { [weak self] in
             guard let self else { return }
             do {
                 let created = try await self.createMessage(
-                    CreateMessageRequest(type: .text, text: text, attachments: nil)
+                    CreateMessageRequest(
+                        type: .text,
+                        text: text,
+                        attachments: nil,
+                        replyToMessageId: replyMessageID
+                    )
                 )
                 guard !Task.isCancelled else { return }
                 await MainActor.run {
                     self.mergeCreatedMessage(created)
                     self.inputBar.clearText()
+                    self.clearComposerContextState(restoreDraft: false)
                     self.inputBar.setSending(false)
                     self.sendTask = nil
                 }
@@ -814,6 +926,66 @@ final class ChatDetailViewController: BaseViewController {
         }
     }
 
+    private func sendEditedMessage(messageID: String, text: String) {
+        guard
+            let message = message(withID: messageID),
+            message.senderId == currentUser.id,
+            message.type == .text,
+            !message.isDeletedForEveryone
+        else {
+            cancelComposerContext()
+            showAlert(message: "This message can no longer be edited.")
+            return
+        }
+
+        inputBar.setSending(true)
+        sendTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                let updated = try await self.updateMessage(messageID: messageID, text: text)
+                guard !Task.isCancelled else { return }
+                await MainActor.run {
+                    self.mergeMutationMessage(updated)
+                    self.inputBar.clearText()
+                    self.clearComposerContextState(restoreDraft: false)
+                    self.inputBar.setSending(false)
+                    self.sendTask = nil
+                }
+            } catch {
+                guard !Task.isCancelled else { return }
+                await MainActor.run {
+                    self.inputBar.restoreText(text)
+                    self.inputBar.setSending(false)
+                    self.sendTask = nil
+                    self.showAlert(message: error.localizedDescription)
+                }
+            }
+        }
+    }
+
+    private func updateMessage(messageID: String, text: String) async throws -> Message {
+        if SocketService.shared.isConnected {
+            do {
+                return try await SocketService.shared.editMessage(
+                    chatId: chat.id,
+                    messageId: messageID,
+                    text: text
+                )
+            } catch {
+                return try await messageService.editMessage(
+                    chatId: chat.id,
+                    messageId: messageID,
+                    text: text
+                )
+            }
+        }
+        return try await messageService.editMessage(
+            chatId: chat.id,
+            messageId: messageID,
+            text: text
+        )
+    }
+
     private func createMessage(_ request: CreateMessageRequest) async throws -> Message {
         if SocketService.shared.isConnected {
             do {
@@ -821,7 +993,8 @@ final class ChatDetailViewController: BaseViewController {
                     chatId: chat.id,
                     type: request.type,
                     text: request.text,
-                    attachments: request.attachments
+                    attachments: request.attachments,
+                    replyToMessageId: request.replyToMessageId
                 )
             } catch {
                 return try await messageService.sendMessage(chatId: chat.id, request: request)
@@ -832,7 +1005,10 @@ final class ChatDetailViewController: BaseViewController {
     }
 
     private func mergeCreatedMessage(_ created: Message) {
-        if let index = messages.firstIndex(where: { $0.id == created.id }) {
+        let createdID = normalizedMessageID(created.id)
+        guard !createdID.isEmpty else { return }
+        if let index = messages.firstIndex(where: { normalizedMessageID($0.id) == createdID }) {
+            guard messages[index] != created else { return }
             messages[index] = created
         } else {
             messages.append(created)
@@ -843,8 +1019,49 @@ final class ChatDetailViewController: BaseViewController {
         scrollToBottom(animated: true)
     }
 
+    private func mergeMutationMessage(_ updated: Message) {
+        let updatedID = normalizedMessageID(updated.id)
+        let updatedChatID = updated.chatId.trimmingCharacters(in: .whitespacesAndNewlines)
+        let currentChatID = chat.id.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard
+            !updatedID.isEmpty,
+            updatedChatID == currentChatID
+        else { return }
+
+        if updated.isDeletedForEveryone {
+            if normalizedMessageID(editingMessageID ?? "") == updatedID {
+                clearComposerContextState(restoreDraft: true)
+            } else if normalizedMessageID(replyToMessageID ?? "") == updatedID {
+                clearComposerContextState(restoreDraft: false)
+            }
+        }
+
+        if updated.isDeletedForMe {
+            let previousCount = messages.count
+            messages.removeAll { normalizedMessageID($0.id) == updatedID }
+            guard messages.count != previousCount else { return }
+        } else if let index = messages.firstIndex(where: { normalizedMessageID($0.id) == updatedID }) {
+            guard messages[index] != updated else { return }
+            messages[index] = updated
+        } else {
+            loadMessages()
+            return
+        }
+
+        messages.sort(by: sortMessages)
+        tableView.reloadData()
+        if messages.isEmpty {
+            showMessageState(
+                title: "No messages yet",
+                body: "Send a message to start this conversation"
+            )
+        } else {
+            hideStateOverlay()
+        }
+    }
+
     private func showAttachmentSheet() {
-        guard sendTask == nil, mediaTask == nil else { return }
+        guard sendTask == nil, mediaTask == nil, editingMessageID == nil else { return }
 
         let sheet = UIAlertController(title: nil, message: nil, preferredStyle: .actionSheet)
         sheet.addAction(UIAlertAction(title: "Photo", style: .default) { [weak self] _ in
@@ -916,6 +1133,7 @@ final class ChatDetailViewController: BaseViewController {
         guard mediaTask == nil, sendTask == nil else { return }
         inputBar.setSending(true)
         let localFileSize = PickedMediaFile.fileSize(at: fileURL)
+        let replyMessageID = replyToMessageID
 
         mediaTask = Task { [weak self] in
             guard let self else { return }
@@ -940,7 +1158,8 @@ final class ChatDetailViewController: BaseViewController {
                         CreateMessageRequest(
                             type: messageType,
                             text: text,
-                            attachments: [attachment]
+                            attachments: [attachment],
+                            replyToMessageId: replyMessageID
                         )
                     )
                 } catch {
@@ -950,6 +1169,7 @@ final class ChatDetailViewController: BaseViewController {
                 guard !Task.isCancelled else { return }
                 await MainActor.run {
                     self.mergeCreatedMessage(created)
+                    self.clearComposerContextState(restoreDraft: false)
                     self.inputBar.setSending(false)
                     self.mediaTask = nil
                 }
@@ -1090,6 +1310,414 @@ final class ChatDetailViewController: BaseViewController {
         }
     }
 
+    @objc private func handleMessageLongPress(_ gesture: UILongPressGestureRecognizer) {
+        guard gesture.state == .began, presentedViewController == nil else { return }
+        let point = gesture.location(in: tableView)
+        guard
+            let indexPath = tableView.indexPathForRow(at: point),
+            messages.indices.contains(indexPath.row)
+        else { return }
+
+        let message = messages[indexPath.row]
+        guard !message.isDeletedForEveryone, !message.isDeletedForMe else { return }
+        let anchorRect = tableView.rectForRow(at: indexPath)
+        presentMessageActions(messageID: message.id, anchorRect: anchorRect)
+    }
+
+    private func presentMessageActions(messageID: String, anchorRect: CGRect) {
+        guard let message = message(withID: messageID), !message.isDeletedForEveryone else { return }
+        let isOwnMessage = message.senderId == currentUser.id
+        let trimmedText = message.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let menu = UIAlertController(title: "Message actions", message: nil, preferredStyle: .actionSheet)
+
+        menu.addAction(UIAlertAction(title: "Reply", style: .default) { [weak self] _ in
+            self?.beginReply(to: messageID)
+        })
+
+        if message.type == .text, !trimmedText.isEmpty {
+            menu.addAction(UIAlertAction(title: "Copy", style: .default) { [weak self] _ in
+                self?.copyMessage(messageID: messageID)
+            })
+        }
+
+        menu.addAction(UIAlertAction(title: "React", style: .default) { [weak self] _ in
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                self?.presentReactionActions(messageID: messageID, anchorRect: anchorRect)
+            }
+        })
+
+        if isOwnMessage, message.type == .text {
+            menu.addAction(UIAlertAction(title: "Edit", style: .default) { [weak self] _ in
+                self?.beginEditing(messageID: messageID)
+            })
+        }
+
+        if isOwnMessage {
+            menu.addAction(UIAlertAction(title: "Delete", style: .destructive) { [weak self] _ in
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                    self?.confirmDelete(messageID: messageID)
+                }
+            })
+        }
+
+        menu.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        menu.popoverPresentationController?.sourceView = tableView
+        menu.popoverPresentationController?.sourceRect = anchorRect
+        present(menu, animated: true)
+    }
+
+    private func presentReactionActions(messageID: String, anchorRect: CGRect) {
+        guard
+            presentedViewController == nil,
+            let message = message(withID: messageID),
+            !message.isDeletedForEveryone
+        else { return }
+
+        let currentEmoji = message.reactions.first { $0.userId == currentUser.id }?.emoji
+        let menu = UIAlertController(
+            title: "Choose reaction",
+            message: currentEmoji == nil ? nil : "Tap your current reaction to remove it.",
+            preferredStyle: .actionSheet
+        )
+        Self.quickReactions.forEach { emoji in
+            let title = emoji == currentEmoji ? "\(emoji)  Remove" : emoji
+            menu.addAction(UIAlertAction(title: title, style: .default) { [weak self] _ in
+                self?.applyReaction(messageID: messageID, emoji: emoji)
+            })
+        }
+        menu.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        menu.popoverPresentationController?.sourceView = tableView
+        menu.popoverPresentationController?.sourceRect = anchorRect
+        present(menu, animated: true)
+    }
+
+    private func beginReply(to messageID: String) {
+        guard let message = message(withID: messageID), !message.isDeletedForEveryone else {
+            showAlert(message: "This message is no longer available.")
+            return
+        }
+        clearComposerContextState(restoreDraft: true)
+        replyToMessageID = message.id
+        showComposerContext(
+            title: senderName(for: message),
+            summary: messageSummary(message)
+        )
+        inputBar.focusTextInput()
+    }
+
+    private func beginEditing(messageID: String) {
+        guard
+            let message = message(withID: messageID),
+            message.senderId == currentUser.id,
+            message.type == .text,
+            !message.isDeletedForEveryone
+        else {
+            showAlert(message: "This message cannot be edited.")
+            return
+        }
+        clearComposerContextState(restoreDraft: true)
+        composerDraftBeforeEdit = inputBar.currentText
+        editingMessageID = message.id
+        inputBar.restoreText(message.text)
+        showComposerContext(title: "Editing message", summary: messageSummary(message))
+        inputBar.focusTextInput()
+    }
+
+    private func copyMessage(messageID: String) {
+        guard
+            let message = message(withID: messageID),
+            message.type == .text,
+            !message.isDeletedForEveryone
+        else { return }
+        let text = message.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        UIPasteboard.general.string = text
+        guard UIPasteboard.general.string == text else {
+            showAlert(message: "Message could not be copied.")
+            return
+        }
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+        UIAccessibility.post(notification: .announcement, argument: "Copied")
+        showActionFeedback("Copied")
+    }
+
+    private func confirmDelete(messageID: String) {
+        guard
+            presentedViewController == nil,
+            let message = message(withID: messageID),
+            message.senderId == currentUser.id,
+            !message.isDeletedForEveryone
+        else { return }
+
+        let alert = UIAlertController(
+            title: "Delete message?",
+            message: "This will delete the message for everyone.",
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Delete", style: .destructive) { [weak self] _ in
+            self?.deleteMessage(messageID: messageID)
+        })
+        present(alert, animated: true)
+    }
+
+    private func deleteMessage(messageID: String) {
+        guard
+            actionTask == nil,
+            let message = message(withID: messageID),
+            message.senderId == currentUser.id,
+            !message.isDeletedForEveryone
+        else { return }
+
+        actionTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                let deleted = try await self.deleteMessageOnServer(messageID: messageID)
+                guard !Task.isCancelled else { return }
+                await MainActor.run {
+                    self.mergeMutationMessage(deleted)
+                    self.actionTask = nil
+                }
+            } catch {
+                guard !Task.isCancelled else { return }
+                await MainActor.run {
+                    self.actionTask = nil
+                    self.showAlert(message: error.localizedDescription)
+                }
+            }
+        }
+    }
+
+    private func deleteMessageOnServer(messageID: String) async throws -> Message {
+        if SocketService.shared.isConnected {
+            do {
+                return try await SocketService.shared.deleteMessage(
+                    chatId: chat.id,
+                    messageId: messageID,
+                    forEveryone: true
+                )
+            } catch {
+                return try await messageService.deleteMessage(
+                    chatId: chat.id,
+                    messageId: messageID,
+                    forEveryone: true
+                )
+            }
+        }
+        return try await messageService.deleteMessage(
+            chatId: chat.id,
+            messageId: messageID,
+            forEveryone: true
+        )
+    }
+
+    private func applyReaction(messageID: String, emoji: String) {
+        guard
+            actionTask == nil,
+            Self.quickReactions.contains(emoji),
+            let message = message(withID: messageID),
+            !message.isDeletedForEveryone
+        else { return }
+        let shouldRemove = message.reactions.contains {
+            $0.userId == currentUser.id && $0.emoji == emoji
+        }
+
+        actionTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                let updated = try await self.updateReactionOnServer(
+                    messageID: messageID,
+                    emoji: emoji,
+                    remove: shouldRemove
+                )
+                guard !Task.isCancelled else { return }
+                await MainActor.run {
+                    self.mergeMutationMessage(updated)
+                    self.actionTask = nil
+                }
+            } catch {
+                guard !Task.isCancelled else { return }
+                await MainActor.run {
+                    self.actionTask = nil
+                    self.showAlert(message: error.localizedDescription)
+                }
+            }
+        }
+    }
+
+    private func updateReactionOnServer(
+        messageID: String,
+        emoji: String,
+        remove: Bool
+    ) async throws -> Message {
+        if SocketService.shared.isConnected {
+            do {
+                if remove {
+                    return try await SocketService.shared.removeReaction(
+                        chatId: chat.id,
+                        messageId: messageID
+                    )
+                }
+                return try await SocketService.shared.addReaction(
+                    chatId: chat.id,
+                    messageId: messageID,
+                    emoji: emoji
+                )
+            } catch {
+                if remove {
+                    return try await messageService.removeReaction(
+                        chatId: chat.id,
+                        messageId: messageID
+                    )
+                }
+                return try await messageService.addReaction(
+                    chatId: chat.id,
+                    messageId: messageID,
+                    emoji: emoji
+                )
+            }
+        }
+        if remove {
+            return try await messageService.removeReaction(
+                chatId: chat.id,
+                messageId: messageID
+            )
+        }
+        return try await messageService.addReaction(
+            chatId: chat.id,
+            messageId: messageID,
+            emoji: emoji
+        )
+    }
+
+    private func showComposerContext(title: String, summary: String) {
+        composerContextTitle.text = title
+        composerContextSummary.text = summary
+        composerContextView.isHidden = false
+        composerContextHeightConstraint?.constant = 56
+        view.layoutIfNeeded()
+    }
+
+    @objc private func cancelComposerContext() {
+        guard sendTask == nil, mediaTask == nil else { return }
+        clearComposerContextState(restoreDraft: true)
+    }
+
+    private func clearComposerContextState(restoreDraft: Bool) {
+        let draft = editingMessageID == nil ? nil : composerDraftBeforeEdit
+        replyToMessageID = nil
+        editingMessageID = nil
+        composerDraftBeforeEdit = nil
+        composerContextTitle.text = nil
+        composerContextSummary.text = nil
+        composerContextHeightConstraint?.constant = 0
+        composerContextView.isHidden = true
+        if restoreDraft, let draft {
+            inputBar.restoreText(draft)
+        }
+    }
+
+    private func message(withID messageID: String) -> Message? {
+        let normalizedID = normalizedMessageID(messageID)
+        guard !normalizedID.isEmpty else { return nil }
+        return messages.first { normalizedMessageID($0.id) == normalizedID }
+    }
+
+    private func normalizedMessageID(_ value: String) -> String {
+        value.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func senderName(for message: Message) -> String {
+        if message.senderId == currentUser.id {
+            return "You"
+        }
+        if let name = chat.members.first(where: { $0.userId == message.senderId })?.user?.name,
+           !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return name
+        }
+        return chat.type == .group ? "Group member" : chat.displayName(viewerUserId: currentUser.id)
+    }
+
+    private func messageSummary(_ message: Message) -> String {
+        if message.isDeletedForEveryone {
+            return "This message was deleted"
+        }
+        switch message.type {
+        case .text:
+            let text = message.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            return text.isEmpty ? "Message" : String(text.prefix(120))
+        case .image:
+            return "Photo"
+        case .document:
+            let rawFileName = message.primaryAttachment?.fileName ?? ""
+            let fileName = rawFileName.trimmingCharacters(in: .whitespacesAndNewlines)
+            return fileName.isEmpty ? "Document" : fileName
+        case .video:
+            return "Video"
+        case .audio, .voice:
+            return "Voice message"
+        default:
+            let displayText = message.displayText.trimmingCharacters(in: .whitespacesAndNewlines)
+            return displayText.isEmpty ? "Message" : displayText
+        }
+    }
+
+    private func replyPreview(for message: Message) -> MessageReplyPreview? {
+        guard !message.isDeletedForEveryone, let replyID = message.replyToMessageId else { return nil }
+        guard let repliedMessage = self.message(withID: replyID) else {
+            return MessageReplyPreview(senderName: "Reply", summary: "Message unavailable")
+        }
+        return MessageReplyPreview(
+            senderName: senderName(for: repliedMessage),
+            summary: messageSummary(repliedMessage)
+        )
+    }
+
+    private func showActionFeedback(_ text: String) {
+        let feedbackTag = 9417
+        view.viewWithTag(feedbackTag)?.removeFromSuperview()
+
+        let container = UIView()
+        container.tag = feedbackTag
+        container.translatesAutoresizingMaskIntoConstraints = false
+        container.backgroundColor = ChitChatColors.chatDetailInput
+        container.layer.cornerRadius = 16
+        container.layer.cornerCurve = .continuous
+
+        let label = UILabel()
+        label.translatesAutoresizingMaskIntoConstraints = false
+        label.text = text
+        label.textColor = ChitChatColors.textPrimary
+        label.font = UIFont.systemFont(ofSize: 12, weight: .semibold)
+        container.addSubview(label)
+        view.addSubview(container)
+
+        NSLayoutConstraint.activate([
+            container.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            container.bottomAnchor.constraint(equalTo: composerContextView.topAnchor, constant: -10),
+            label.topAnchor.constraint(equalTo: container.topAnchor, constant: 7),
+            label.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 14),
+            label.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -14),
+            label.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -7)
+        ])
+
+        container.alpha = 0
+        UIView.animate(withDuration: 0.16) {
+            container.alpha = 1
+        }
+        UIView.animate(
+            withDuration: 0.2,
+            delay: 1.1,
+            options: [.curveEaseInOut],
+            animations: {
+                container.alpha = 0
+            },
+            completion: { _ in
+                container.removeFromSuperview()
+            }
+        )
+    }
+
     private func observeRealtimeMessages() {
         let center = NotificationCenter.default
         socketObservers.append(
@@ -1120,10 +1748,19 @@ final class ChatDetailViewController: BaseViewController {
             event.chatId == chat.id
         else { return }
 
+        if !isNew {
+            mergeMutationMessage(event.message)
+            return
+        }
+
         let shouldFollow = isNearBottom || event.message.senderId == currentUser.id
+        let eventMessageID = normalizedMessageID(event.message.id)
+        guard !eventMessageID.isEmpty else { return }
         if event.message.isDeletedForMe {
-            messages.removeAll { $0.id == event.message.id }
-        } else if let index = messages.firstIndex(where: { $0.id == event.message.id }) {
+            messages.removeAll { normalizedMessageID($0.id) == eventMessageID }
+        } else if let index = messages.firstIndex(where: {
+            normalizedMessageID($0.id) == eventMessageID
+        }) {
             guard messages[index] != event.message else { return }
             messages[index] = event.message
         } else {
@@ -1323,7 +1960,12 @@ extension ChatDetailViewController: UITableViewDataSource, UITableViewDelegate {
             return UITableViewCell()
         }
         let message = messages[indexPath.row]
-        cell.configure(message: message, isOutgoing: message.senderId == currentUser.id)
+        cell.configure(
+            message: message,
+            isOutgoing: message.senderId == currentUser.id,
+            replyPreview: replyPreview(for: message),
+            currentUserId: currentUser.id
+        )
         return cell
     }
 

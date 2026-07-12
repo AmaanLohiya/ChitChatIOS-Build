@@ -10,6 +10,11 @@ private enum ChatDetailTimeFormatter {
     }
 }
 
+struct MessageReplyPreview {
+    let senderName: String
+    let summary: String
+}
+
 private enum ChatDetailFileFormatter {
     static func string(from value: Int?) -> String? {
         guard let value, value > 0 else { return nil }
@@ -98,7 +103,7 @@ private final class MessageReadView: UIView {
     }
 
     required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
+        return nil
     }
 
     override func layoutSubviews() {
@@ -127,7 +132,7 @@ private final class MessageBubbleBackgroundView: UIView {
     }
 
     required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
+        return nil
     }
 
     func configure(isOutgoing: Bool, radius: CGFloat = ChitChatSpacing.chatDetailBubbleRadius) {
@@ -204,8 +209,13 @@ final class MessageBubbleCell: UITableViewCell {
     static let reuseIdentifier = "MessageBubbleCell"
 
     private static let imageCache = NSCache<NSString, UIImage>()
+    private static let reactionOrder = ["👍", "❤️", "😂", "😮", "😢", "🙏"]
 
     private let bubbleView = MessageBubbleBackgroundView()
+    private let replyPreviewView = UIView()
+    private let replyAccentView = UIView()
+    private let replySenderLabel = UILabel()
+    private let replySummaryLabel = UILabel()
     private let messageLabel = UILabel()
     private let mediaImageView = UIImageView()
     private let captionLabel = UILabel()
@@ -217,12 +227,16 @@ final class MessageBubbleCell: UITableViewCell {
     private let documentHintLabel = UILabel()
     private let timeLabel = UILabel()
     private let readView = MessageReadView()
+    private let reactionPill = UIView()
+    private let reactionLabel = UILabel()
 
     private var leadingConstraint: NSLayoutConstraint?
     private var trailingConstraint: NSLayoutConstraint?
+    private var bubbleBottomConstraint: NSLayoutConstraint?
     private var incomingTimeTrailing: NSLayoutConstraint?
     private var outgoingTimeTrailing: NSLayoutConstraint?
     private var activeLayoutConstraints: [NSLayoutConstraint] = []
+    private var reactionLayoutConstraints: [NSLayoutConstraint] = []
     private var imageTask: URLSessionDataTask?
     private var representedImageURL: String?
 
@@ -232,7 +246,7 @@ final class MessageBubbleCell: UITableViewCell {
     }
 
     required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
+        return nil
     }
 
     private func buildUI() {
@@ -241,6 +255,26 @@ final class MessageBubbleCell: UITableViewCell {
         selectionStyle = .none
 
         bubbleView.translatesAutoresizingMaskIntoConstraints = false
+
+        replyPreviewView.translatesAutoresizingMaskIntoConstraints = false
+        replyPreviewView.backgroundColor = ChitChatColors.chatDetailInput.withAlphaComponent(0.72)
+        replyPreviewView.layer.cornerRadius = 9
+        replyPreviewView.layer.cornerCurve = .continuous
+        replyPreviewView.clipsToBounds = true
+        replyPreviewView.isHidden = true
+
+        replyAccentView.translatesAutoresizingMaskIntoConstraints = false
+        replyAccentView.backgroundColor = ChitChatColors.accent
+
+        replySenderLabel.translatesAutoresizingMaskIntoConstraints = false
+        replySenderLabel.font = UIFont.systemFont(ofSize: 11, weight: .semibold)
+        replySenderLabel.textColor = ChitChatColors.accent
+        replySenderLabel.numberOfLines = 1
+
+        replySummaryLabel.translatesAutoresizingMaskIntoConstraints = false
+        replySummaryLabel.font = UIFont.systemFont(ofSize: 11, weight: .regular)
+        replySummaryLabel.textColor = ChitChatColors.textMuted
+        replySummaryLabel.numberOfLines = 1
 
         messageLabel.translatesAutoresizingMaskIntoConstraints = false
         messageLabel.textColor = ChitChatColors.textPrimary
@@ -311,7 +345,24 @@ final class MessageBubbleCell: UITableViewCell {
 
         readView.isHidden = true
 
+        reactionPill.translatesAutoresizingMaskIntoConstraints = false
+        reactionPill.backgroundColor = ChitChatColors.chatDetailInput
+        reactionPill.layer.cornerRadius = 11
+        reactionPill.layer.cornerCurve = .continuous
+        reactionPill.layer.borderWidth = 1
+        reactionPill.isHidden = true
+
+        reactionLabel.translatesAutoresizingMaskIntoConstraints = false
+        reactionLabel.font = UIFont.systemFont(ofSize: 12, weight: .medium)
+        reactionLabel.textColor = ChitChatColors.textPrimary
+        reactionLabel.numberOfLines = 1
+        reactionLabel.lineBreakMode = .byTruncatingTail
+
         contentView.addSubview(bubbleView)
+        bubbleView.addSubview(replyPreviewView)
+        replyPreviewView.addSubview(replyAccentView)
+        replyPreviewView.addSubview(replySenderLabel)
+        replyPreviewView.addSubview(replySummaryLabel)
         bubbleView.addSubview(messageLabel)
         bubbleView.addSubview(mediaImageView)
         bubbleView.addSubview(captionLabel)
@@ -323,6 +374,8 @@ final class MessageBubbleCell: UITableViewCell {
         bubbleView.addSubview(documentHintLabel)
         bubbleView.addSubview(timeLabel)
         bubbleView.addSubview(readView)
+        contentView.addSubview(reactionPill)
+        reactionPill.addSubview(reactionLabel)
 
         incomingTimeTrailing = timeLabel.trailingAnchor.constraint(
             equalTo: bubbleView.trailingAnchor,
@@ -333,13 +386,36 @@ final class MessageBubbleCell: UITableViewCell {
             constant: -3
         )
 
+        let bubbleBottomConstraint = bubbleView.bottomAnchor.constraint(
+            equalTo: contentView.bottomAnchor,
+            constant: -ChitChatSpacing.chatDetailRowBottom
+        )
+        self.bubbleBottomConstraint = bubbleBottomConstraint
+
         NSLayoutConstraint.activate([
             bubbleView.topAnchor.constraint(equalTo: contentView.topAnchor),
-            bubbleView.bottomAnchor.constraint(
-                equalTo: contentView.bottomAnchor,
-                constant: -ChitChatSpacing.chatDetailRowBottom
-            ),
+            bubbleBottomConstraint,
             bubbleView.widthAnchor.constraint(lessThanOrEqualTo: contentView.widthAnchor, multiplier: 0.77),
+
+            replyPreviewView.topAnchor.constraint(equalTo: bubbleView.topAnchor, constant: 8),
+            replyPreviewView.leadingAnchor.constraint(equalTo: bubbleView.leadingAnchor, constant: 8),
+            replyPreviewView.trailingAnchor.constraint(equalTo: bubbleView.trailingAnchor, constant: -8),
+            replyPreviewView.heightAnchor.constraint(equalToConstant: 42),
+
+            replyAccentView.topAnchor.constraint(equalTo: replyPreviewView.topAnchor),
+            replyAccentView.leadingAnchor.constraint(equalTo: replyPreviewView.leadingAnchor),
+            replyAccentView.bottomAnchor.constraint(equalTo: replyPreviewView.bottomAnchor),
+            replyAccentView.widthAnchor.constraint(equalToConstant: 3),
+
+            replySenderLabel.topAnchor.constraint(equalTo: replyPreviewView.topAnchor, constant: 5),
+            replySenderLabel.leadingAnchor.constraint(equalTo: replyAccentView.trailingAnchor, constant: 8),
+            replySenderLabel.trailingAnchor.constraint(equalTo: replyPreviewView.trailingAnchor, constant: -8),
+            replySenderLabel.heightAnchor.constraint(equalToConstant: 14),
+
+            replySummaryLabel.topAnchor.constraint(equalTo: replySenderLabel.bottomAnchor, constant: 1),
+            replySummaryLabel.leadingAnchor.constraint(equalTo: replySenderLabel.leadingAnchor),
+            replySummaryLabel.trailingAnchor.constraint(equalTo: replySenderLabel.trailingAnchor),
+            replySummaryLabel.heightAnchor.constraint(equalToConstant: 14),
 
             readView.trailingAnchor.constraint(
                 equalTo: bubbleView.trailingAnchor,
@@ -351,7 +427,13 @@ final class MessageBubbleCell: UITableViewCell {
             documentIcon.centerXAnchor.constraint(equalTo: documentIconWrap.centerXAnchor),
             documentIcon.centerYAnchor.constraint(equalTo: documentIconWrap.centerYAnchor),
             documentIcon.widthAnchor.constraint(equalToConstant: 22),
-            documentIcon.heightAnchor.constraint(equalToConstant: 22)
+            documentIcon.heightAnchor.constraint(equalToConstant: 22),
+
+            reactionLabel.topAnchor.constraint(equalTo: reactionPill.topAnchor, constant: 3),
+            reactionLabel.leadingAnchor.constraint(equalTo: reactionPill.leadingAnchor, constant: 8),
+            reactionLabel.trailingAnchor.constraint(equalTo: reactionPill.trailingAnchor, constant: -8),
+            reactionLabel.bottomAnchor.constraint(equalTo: reactionPill.bottomAnchor, constant: -3),
+            reactionPill.widthAnchor.constraint(lessThanOrEqualTo: bubbleView.widthAnchor)
         ])
     }
 
@@ -371,13 +453,25 @@ final class MessageBubbleCell: UITableViewCell {
         outgoingTimeTrailing?.isActive = false
         NSLayoutConstraint.deactivate(activeLayoutConstraints)
         activeLayoutConstraints.removeAll()
+        NSLayoutConstraint.deactivate(reactionLayoutConstraints)
+        reactionLayoutConstraints.removeAll()
+        bubbleBottomConstraint?.isActive = true
         leadingConstraint = nil
         trailingConstraint = nil
+        replySenderLabel.text = nil
+        replySummaryLabel.text = nil
+        reactionLabel.text = nil
         resetContentVisibility()
     }
 
-    func configure(message: Message, isOutgoing: Bool) {
+    func configure(
+        message: Message,
+        isOutgoing: Bool,
+        replyPreview: MessageReplyPreview?,
+        currentUserId: String
+    ) {
         resetForConfiguration()
+        configureReplyPreview(replyPreview)
 
         if isOutgoing {
             trailingConstraint = bubbleView.trailingAnchor.constraint(
@@ -399,7 +493,12 @@ final class MessageBubbleCell: UITableViewCell {
             timeLabel.textColor = ChitChatColors.chatDetailReceivedTime
         }
 
-        timeLabel.text = ChatDetailTimeFormatter.string(from: message.createdAt)
+        let timestamp = ChatDetailTimeFormatter.string(from: message.createdAt)
+        if message.editedAt != nil, !message.isDeletedForEveryone {
+            timeLabel.text = timestamp.isEmpty ? "edited" : "\(timestamp) · edited"
+        } else {
+            timeLabel.text = timestamp
+        }
 
         if message.isDeletedForEveryone || message.type == .text {
             configureText(message, isOutgoing: isOutgoing)
@@ -411,7 +510,77 @@ final class MessageBubbleCell: UITableViewCell {
             configureText(message, isOutgoing: isOutgoing)
         }
 
+        configureReactions(message.reactions, currentUserId: currentUserId, isOutgoing: isOutgoing)
+
         accessibilityLabel = "\(isOutgoing ? "Sent" : "Received"): \(message.displayText)"
+    }
+
+    private func configureReplyPreview(_ preview: MessageReplyPreview?) {
+        guard let preview else {
+            replyPreviewView.isHidden = true
+            return
+        }
+        replySenderLabel.text = preview.senderName
+        replySummaryLabel.text = preview.summary
+        replyPreviewView.isHidden = false
+    }
+
+    private func contentTopConstraint(
+        for view: UIView,
+        defaultConstant: CGFloat
+    ) -> NSLayoutConstraint {
+        if replyPreviewView.isHidden {
+            return view.topAnchor.constraint(equalTo: bubbleView.topAnchor, constant: defaultConstant)
+        }
+        return view.topAnchor.constraint(equalTo: replyPreviewView.bottomAnchor, constant: 6)
+    }
+
+    private func configureReactions(
+        _ reactions: [MessageReaction],
+        currentUserId: String,
+        isOutgoing: Bool
+    ) {
+        guard !reactions.isEmpty else {
+            reactionPill.isHidden = true
+            return
+        }
+
+        let counts = Dictionary(grouping: reactions) { $0.emoji }.mapValues { $0.count }
+        let known = Set(Self.reactionOrder)
+        let orderedEmojis = Self.reactionOrder.filter { counts[$0] != nil }
+            + counts.keys.filter { !known.contains($0) }.sorted()
+        reactionLabel.text = orderedEmojis.map { emoji in
+            let count = counts[emoji] ?? 0
+            return count > 1 ? "\(emoji) \(count)" : emoji
+        }.joined(separator: "  ")
+
+        let includesCurrentUser = reactions.contains { $0.userId == currentUserId }
+        reactionPill.layer.borderColor = (
+            includesCurrentUser ? ChitChatColors.accent : ChitChatColors.chatDetailBorder
+        ).cgColor
+        reactionPill.accessibilityLabel = includesCurrentUser
+            ? "Reactions, including yours"
+            : "Message reactions"
+        reactionPill.isHidden = false
+        bubbleBottomConstraint?.isActive = false
+
+        reactionLayoutConstraints = [
+            reactionPill.topAnchor.constraint(equalTo: bubbleView.bottomAnchor, constant: -2),
+            reactionPill.bottomAnchor.constraint(
+                equalTo: contentView.bottomAnchor,
+                constant: -ChitChatSpacing.chatDetailRowBottom
+            )
+        ]
+        if isOutgoing {
+            reactionLayoutConstraints.append(
+                reactionPill.trailingAnchor.constraint(equalTo: bubbleView.trailingAnchor, constant: -8)
+            )
+        } else {
+            reactionLayoutConstraints.append(
+                reactionPill.leadingAnchor.constraint(equalTo: bubbleView.leadingAnchor, constant: 8)
+            )
+        }
+        NSLayoutConstraint.activate(reactionLayoutConstraints)
     }
 
     private func configureText(_ message: Message, isOutgoing: Bool) {
@@ -420,9 +589,9 @@ final class MessageBubbleCell: UITableViewCell {
         messageLabel.attributedText = attributedMessage(message)
 
         activeLayoutConstraints = [
-            messageLabel.topAnchor.constraint(
-                equalTo: bubbleView.topAnchor,
-                constant: ChitChatSpacing.chatDetailBubbleVertical
+            contentTopConstraint(
+                for: messageLabel,
+                defaultConstant: ChitChatSpacing.chatDetailBubbleVertical
             ),
             messageLabel.leadingAnchor.constraint(
                 equalTo: bubbleView.leadingAnchor,
@@ -456,7 +625,7 @@ final class MessageBubbleCell: UITableViewCell {
         imageWidth.priority = .defaultHigh
 
         var constraints = [
-            mediaImageView.topAnchor.constraint(equalTo: bubbleView.topAnchor),
+            contentTopConstraint(for: mediaImageView, defaultConstant: 0),
             mediaImageView.leadingAnchor.constraint(equalTo: bubbleView.leadingAnchor),
             mediaImageView.trailingAnchor.constraint(equalTo: bubbleView.trailingAnchor),
             imageWidth,
@@ -506,7 +675,7 @@ final class MessageBubbleCell: UITableViewCell {
         activeLayoutConstraints = [
             bubbleView.widthAnchor.constraint(greaterThanOrEqualToConstant: 214),
 
-            documentIconWrap.topAnchor.constraint(equalTo: bubbleView.topAnchor, constant: 10),
+            contentTopConstraint(for: documentIconWrap, defaultConstant: 10),
             documentIconWrap.leadingAnchor.constraint(equalTo: bubbleView.leadingAnchor, constant: 12),
             documentIconWrap.widthAnchor.constraint(equalToConstant: 44),
             documentIconWrap.heightAnchor.constraint(equalToConstant: 44),
@@ -561,7 +730,9 @@ final class MessageBubbleCell: UITableViewCell {
             documentNameLabel,
             documentSizeLabel,
             documentDivider,
-            documentHintLabel
+            documentHintLabel,
+            replyPreviewView,
+            reactionPill
         ].forEach { $0.isHidden = true }
         readView.isHidden = true
     }
