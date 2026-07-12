@@ -111,6 +111,7 @@ final class ProfileViewController: BaseViewController {
     init(user: User) {
         self.user = user
         super.init(nibName: nil, bundle: nil)
+        hidesBottomBarWhenPushed = true
     }
 
     required init?(coder: NSCoder) {
@@ -134,6 +135,8 @@ final class ProfileViewController: BaseViewController {
         let scrollView = UIScrollView()
         scrollView.translatesAutoresizingMaskIntoConstraints = false
         scrollView.showsVerticalScrollIndicator = false
+        // The scroll view starts below a custom header, so UIKit must not add a second top inset.
+        scrollView.contentInsetAdjustmentBehavior = .never
 
         let content = UIStackView()
         content.translatesAutoresizingMaskIntoConstraints = false
@@ -141,7 +144,6 @@ final class ProfileViewController: BaseViewController {
         content.spacing = 14
 
         content.addArrangedSubview(makeHero())
-        content.addArrangedSubview(makeQuickActions())
         content.addArrangedSubview(makeInfoCard())
         content.addArrangedSubview(makeProfileRowsCard())
 
@@ -158,7 +160,7 @@ final class ProfileViewController: BaseViewController {
             scrollView.topAnchor.constraint(equalTo: header.bottomAnchor),
             scrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            scrollView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            scrollView.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor),
 
             content.topAnchor.constraint(equalTo: scrollView.contentLayoutGuide.topAnchor, constant: 14),
             content.leadingAnchor.constraint(equalTo: scrollView.contentLayoutGuide.leadingAnchor),
@@ -276,62 +278,6 @@ final class ProfileViewController: BaseViewController {
             status.trailingAnchor.constraint(equalTo: hero.trailingAnchor, constant: -34)
         ])
         return hero
-    }
-
-    private func makeQuickActions() -> UIView {
-        let row = UIStackView()
-        row.translatesAutoresizingMaskIntoConstraints = false
-        row.axis = .horizontal
-        row.distribution = .fillEqually
-        row.spacing = 10
-        row.isLayoutMarginsRelativeArrangement = true
-        row.layoutMargins = UIEdgeInsets(top: 0, left: 16, bottom: 0, right: 16)
-        row.addArrangedSubview(makeQuickAction(symbol: "square.and.pencil", title: "Edit", action: #selector(openEditor)))
-        row.addArrangedSubview(makeQuickAction(symbol: "camera", title: "Photo", action: #selector(openEditor)))
-        row.heightAnchor.constraint(equalToConstant: 108).isActive = true
-        return row
-    }
-
-    private func makeQuickAction(symbol: String, title: String, action: Selector) -> UIControl {
-        let card = UIControl()
-        card.backgroundColor = ChitChatColors.surface
-        card.layer.cornerRadius = 24
-        card.layer.borderColor = ChitChatColors.border.cgColor
-        card.layer.borderWidth = 1
-        card.addTarget(self, action: action, for: .touchUpInside)
-
-        let iconWrap = UIView()
-        iconWrap.translatesAutoresizingMaskIntoConstraints = false
-        iconWrap.backgroundColor = ChitChatColors.accent.withAlphaComponent(0.16)
-        iconWrap.layer.cornerRadius = 14
-
-        let icon = UIImageView(image: UIImage(systemName: symbol))
-        icon.translatesAutoresizingMaskIntoConstraints = false
-        icon.tintColor = ChitChatColors.accent
-        icon.contentMode = .scaleAspectFit
-
-        let label = UILabel()
-        label.translatesAutoresizingMaskIntoConstraints = false
-        label.text = title
-        label.textColor = ChitChatColors.textPrimary
-        label.font = UIFont.systemFont(ofSize: 14, weight: .bold)
-
-        card.addSubview(iconWrap)
-        iconWrap.addSubview(icon)
-        card.addSubview(label)
-        NSLayoutConstraint.activate([
-            iconWrap.topAnchor.constraint(equalTo: card.topAnchor, constant: 16),
-            iconWrap.centerXAnchor.constraint(equalTo: card.centerXAnchor),
-            iconWrap.widthAnchor.constraint(equalToConstant: 44),
-            iconWrap.heightAnchor.constraint(equalToConstant: 44),
-            icon.centerXAnchor.constraint(equalTo: iconWrap.centerXAnchor),
-            icon.centerYAnchor.constraint(equalTo: iconWrap.centerYAnchor),
-            icon.widthAnchor.constraint(equalToConstant: 22),
-            icon.heightAnchor.constraint(equalToConstant: 22),
-            label.topAnchor.constraint(equalTo: iconWrap.bottomAnchor, constant: 12),
-            label.centerXAnchor.constraint(equalTo: card.centerXAnchor)
-        ])
-        return card
     }
 
     private func makeInfoCard() -> UIView {
@@ -542,6 +488,7 @@ final class ProfileEditorViewController: BaseViewController, PHPickerViewControl
         self.mode = mode
         self.saveButton = PrimaryButton(title: mode.saveTitle)
         super.init(nibName: nil, bundle: nil)
+        hidesBottomBarWhenPushed = mode == .edit
     }
 
     required init?(coder: NSCoder) {
@@ -568,6 +515,8 @@ final class ProfileEditorViewController: BaseViewController, PHPickerViewControl
         scrollView.translatesAutoresizingMaskIntoConstraints = false
         scrollView.keyboardDismissMode = .interactive
         scrollView.showsVerticalScrollIndicator = false
+        // Content is explicitly constrained below the custom header.
+        scrollView.contentInsetAdjustmentBehavior = .never
 
         let content = UIStackView()
         content.translatesAutoresizingMaskIntoConstraints = false
