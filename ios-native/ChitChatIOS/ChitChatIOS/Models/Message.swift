@@ -14,7 +14,7 @@ enum MessageType: String, Codable {
     case system
 }
 
-enum MessageStatus {
+enum MessageStatus: Equatable {
     case sent
     case delivered
     case read
@@ -160,10 +160,20 @@ struct Message: Codable, Equatable {
     let isDeletedForEveryone: Bool
     let isDeletedForMe: Bool
 
-    var status: MessageStatus {
-        if readBy.count > 1 { return .read }
-        if deliveredTo.count > 1 { return .delivered }
+    func status(activeParticipantIDs: [String]) -> MessageStatus {
+        let recipientIDs = Set(activeParticipantIDs).filter { $0 != senderId }
+        guard !recipientIDs.isEmpty else { return .sent }
+
+        let readUserIDs = Set(readBy.map(\.userId))
+        if recipientIDs.allSatisfy({ readUserIDs.contains($0) }) { return .read }
+
+        let deliveredUserIDs = Set(deliveredTo.map(\.userId))
+        if recipientIDs.allSatisfy({ deliveredUserIDs.contains($0) }) { return .delivered }
         return .sent
+    }
+
+    var hasBeenReadByAnother: Bool {
+        readBy.contains { $0.userId != senderId }
     }
 
     var primaryAttachment: MessageAttachment? {

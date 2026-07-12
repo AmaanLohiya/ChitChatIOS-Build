@@ -444,6 +444,7 @@ final class ChatDetailViewController: BaseViewController {
     private var mediaTask: Task<Void, Never>?
     private var documentPreviewTask: Task<Void, Never>?
     private var actionTask: Task<Void, Never>?
+    private var receiptTask: Task<Void, Never>?
     private var documentPreviewDataSource: DocumentPreviewDataSource?
     private var documentInteractionController: UIDocumentInteractionController?
     private var composerContextHeightConstraint: NSLayoutConstraint?
@@ -452,6 +453,10 @@ final class ChatDetailViewController: BaseViewController {
     private var composerDraftBeforeEdit: String?
     private var hasLoaded = false
     private var socketObservers: [NSObjectProtocol] = []
+    private var readInFlightMessageIDs = Set<String>()
+    private var deletedForMeMessageIDs = Set<String>()
+    private var isViewVisible = false
+    private var isApplicationActive = UIApplication.shared.applicationState == .active
 
     init(
         chat: Chat,
@@ -487,8 +492,16 @@ final class ChatDetailViewController: BaseViewController {
         SocketService.shared.joinChat(chat.id)
     }
 
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        isViewVisible = true
+        markVisibleIncomingMessagesRead()
+    }
+
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
+        isViewVisible = false
+        receiptTask?.cancel()
         navigationController?.setNavigationBarHidden(false, animated: false)
         if isMovingFromParent || navigationController?.isBeingDismissed == true {
             actionTask?.cancel()
@@ -503,6 +516,7 @@ final class ChatDetailViewController: BaseViewController {
         mediaTask?.cancel()
         documentPreviewTask?.cancel()
         actionTask?.cancel()
+        receiptTask?.cancel()
         headerAvatar.cancelImageLoad()
         socketObservers.forEach { NotificationCenter.default.removeObserver($0) }
         SocketService.shared.leaveChat(chat.id)
@@ -865,6 +879,9 @@ final class ChatDetailViewController: BaseViewController {
                     } else {
                         self.hideStateOverlay()
                         self.scrollToBottom(animated: false)
+                        DispatchQueue.main.async { [weak self] in
+                            self?.markVisibleIncomingMessagesRead()
+                        }
                     }
                 }
             } catch {
@@ -1037,6 +1054,10 @@ final class ChatDetailViewController: BaseViewController {
         }
 
         if updated.isDeletedForMe {
+            deletedForMeMessageIDs.insert(updatedID)
+        }
+
+        if deletedForMeMessageIDs.contains(updatedID) {
             let previousCount = messages.count
             messages.removeAll { normalizedMessageID($0.id) == updatedID }
             guard messages.count != previousCount else { return }
@@ -1352,13 +1373,11 @@ final class ChatDetailViewController: BaseViewController {
             })
         }
 
-        if isOwnMessage {
-            menu.addAction(UIAlertAction(title: "Delete", style: .destructive) { [weak self] _ in
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-                    self?.confirmDelete(messageID: messageID)
-                }
-            })
-        }
+        menu.addAction(UIAlertAction(title: "Delete", style: .destructive) { [weak self] _ in
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                self?.confirmDelete(messageID: messageID)
+            }
+        })
 
         menu.addAction(UIAlertAction(title: "Cancel", style: .cancel))
         menu.popoverPresentationController?.sourceView = tableView
@@ -1445,34 +1464,46 @@ final class ChatDetailViewController: BaseViewController {
         guard
             presentedViewController == nil,
             let message = message(withID: messageID),
-            message.senderId == currentUser.id,
             !message.isDeletedForEveryone
         else { return }
 
+        let canDeleteForEveryone = message.senderId == currentUser.id && !message.hasBeenReadByAnother
+
         let alert = UIAlertController(
             title: "Delete message?",
-            message: "This will delete the message for everyone.",
+            message: canDeleteForEveryone
+                ? "Choose who this message should be removed for."
+                : "This message can be removed only from your chat.",
             preferredStyle: .alert
         )
         alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-        alert.addAction(UIAlertAction(title: "Delete", style: .destructive) { [weak self] _ in
-            self?.deleteMessage(messageID: messageID)
+        alert.addAction(UIAlertAction(title: "Delete for me", style: .destructive) { [weak self] _ in
+            self?.deleteMessage(messageID: messageID, forEveryone: false)
         })
+        if canDeleteForEveryone {
+            alert.addAction(UIAlertAction(title: "Delete for everyone", style: .destructive) {
+                [weak self] _ in
+                self?.deleteMessage(messageID: messageID, forEveryone: true)
+            })
+        }
         present(alert, animated: true)
     }
 
-    private func deleteMessage(messageID: String) {
+    private func deleteMessage(messageID: String, forEveryone: Bool) {
         guard
             actionTask == nil,
             let message = message(withID: messageID),
-            message.senderId == currentUser.id,
-            !message.isDeletedForEveryone
+            !message.isDeletedForEveryone,
+            !forEveryone || message.senderId == currentUser.id
         else { return }
 
         actionTask = Task { [weak self] in
             guard let self else { return }
             do {
-                let deleted = try await self.deleteMessageOnServer(messageID: messageID)
+                let deleted = try await self.deleteMessageOnServer(
+                    messageID: messageID,
+                    forEveryone: forEveryone
+                )
                 guard !Task.isCancelled else { return }
                 await MainActor.run {
                     self.mergeMutationMessage(deleted)
@@ -1482,33 +1513,68 @@ final class ChatDetailViewController: BaseViewController {
                 guard !Task.isCancelled else { return }
                 await MainActor.run {
                     self.actionTask = nil
-                    self.showAlert(message: error.localizedDescription)
+                    if forEveryone, self.isMessageAlreadyReadError(error) {
+                        self.loadMessages()
+                        self.presentDeleteForMeAfterRead(messageID: messageID)
+                    } else {
+                        self.showAlert(message: error.localizedDescription)
+                    }
                 }
             }
         }
     }
 
-    private func deleteMessageOnServer(messageID: String) async throws -> Message {
+    private func deleteMessageOnServer(
+        messageID: String,
+        forEveryone: Bool
+    ) async throws -> Message {
         if SocketService.shared.isConnected {
             do {
                 return try await SocketService.shared.deleteMessage(
                     chatId: chat.id,
                     messageId: messageID,
-                    forEveryone: true
+                    forEveryone: forEveryone
                 )
             } catch {
                 return try await messageService.deleteMessage(
                     chatId: chat.id,
                     messageId: messageID,
-                    forEveryone: true
+                    forEveryone: forEveryone
                 )
             }
         }
         return try await messageService.deleteMessage(
             chatId: chat.id,
             messageId: messageID,
-            forEveryone: true
+            forEveryone: forEveryone
         )
+    }
+
+    private func isMessageAlreadyReadError(_ error: Error) -> Bool {
+        if let apiError = error as? APIClientError,
+           case APIClientError.server(let code, _) = apiError {
+            return code == "MESSAGE_ALREADY_READ"
+        }
+        if let socketError = error as? SocketServiceError,
+           case SocketServiceError.server(let code, _) = socketError {
+            return code == "MESSAGE_ALREADY_READ"
+        }
+        return false
+    }
+
+    private func presentDeleteForMeAfterRead(messageID: String) {
+        guard presentedViewController == nil else { return }
+        let alert = UIAlertController(
+            title: "Message already seen",
+            message: "This message has already been seen. You can delete it only for yourself.",
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Delete for me", style: .destructive) {
+            [weak self] _ in
+            self?.deleteMessage(messageID: messageID, forEveryone: false)
+        })
+        present(alert, animated: true)
     }
 
     private func applyReaction(messageID: String, emoji: String) {
@@ -1718,6 +1784,92 @@ final class ChatDetailViewController: BaseViewController {
         )
     }
 
+    private var activeParticipantIDs: [String] {
+        chat.members
+            .filter { $0.leftAt == nil && $0.deletedAt == nil }
+            .map(\.userId)
+    }
+
+    private var canMarkMessagesRead: Bool {
+        isViewVisible &&
+            isApplicationActive &&
+            viewIfLoaded?.window != nil &&
+            navigationController?.topViewController === self &&
+            presentedViewController == nil
+    }
+
+    private var visibleMessageIDs: Set<String> {
+        Set((tableView.indexPathsForVisibleRows ?? []).compactMap { indexPath in
+            guard messages.indices.contains(indexPath.row) else { return nil }
+            return normalizedMessageID(messages[indexPath.row].id)
+        })
+    }
+
+    private func markVisibleIncomingMessagesRead() {
+        guard receiptTask == nil, canMarkMessagesRead else { return }
+        let visibleIDs = visibleMessageIDs
+        let candidates = messages.filter { message in
+            let messageID = normalizedMessageID(message.id)
+            let isAlreadyRead = message.readBy.contains { $0.userId == currentUser.id }
+            return visibleIDs.contains(messageID) &&
+                message.senderId != currentUser.id &&
+                !message.isDeletedForEveryone &&
+                !message.isDeletedForMe &&
+                !isAlreadyRead &&
+                !readInFlightMessageIDs.contains(messageID)
+        }
+        guard !candidates.isEmpty else { return }
+        candidates.forEach { readInFlightMessageIDs.insert(normalizedMessageID($0.id)) }
+
+        receiptTask = Task { [weak self] in
+            guard let self else { return }
+            for message in candidates {
+                if Task.isCancelled { break }
+                let messageID = self.normalizedMessageID(message.id)
+                guard self.canMarkMessagesRead, self.visibleMessageIDs.contains(messageID) else {
+                    self.readInFlightMessageIDs.remove(messageID)
+                    continue
+                }
+
+                do {
+                    let updated = try await self.acknowledgeRead(messageID: message.id)
+                    if Task.isCancelled {
+                        self.readInFlightMessageIDs.remove(messageID)
+                        break
+                    }
+                    await MainActor.run {
+                        self.mergeMutationMessage(updated)
+                    }
+                } catch {
+                    #if DEBUG
+                    print("[receipts] read acknowledgement failed", messageID, error.localizedDescription)
+                    #endif
+                }
+                await MainActor.run {
+                    self.readInFlightMessageIDs.remove(messageID)
+                }
+            }
+
+            await MainActor.run {
+                candidates.forEach {
+                    self.readInFlightMessageIDs.remove(self.normalizedMessageID($0.id))
+                }
+                self.receiptTask = nil
+            }
+        }
+    }
+
+    private func acknowledgeRead(messageID: String) async throws -> Message {
+        if SocketService.shared.isConnected {
+            do {
+                return try await SocketService.shared.markRead(chatId: chat.id, messageId: messageID)
+            } catch {
+                return try await messageService.markRead(chatId: chat.id, messageId: messageID)
+            }
+        }
+        return try await messageService.markRead(chatId: chat.id, messageId: messageID)
+    }
+
     private func observeRealtimeMessages() {
         let center = NotificationCenter.default
         socketObservers.append(
@@ -1731,6 +1883,7 @@ final class ChatDetailViewController: BaseViewController {
             Notification.Name.socketMessageUpdated,
             .socketMessageDeleted,
             .socketMessageReactionUpdated,
+            .socketMessageDelivered,
             .socketMessageRead
         ].forEach { name in
             socketObservers.append(
@@ -1740,6 +1893,21 @@ final class ChatDetailViewController: BaseViewController {
                 }
             )
         }
+
+        socketObservers.append(
+            center.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) {
+                [weak self] _ in
+                self?.isApplicationActive = true
+                self?.markVisibleIncomingMessagesRead()
+            }
+        )
+        socketObservers.append(
+            center.addObserver(forName: UIApplication.willResignActiveNotification, object: nil, queue: .main) {
+                [weak self] _ in
+                self?.isApplicationActive = false
+                self?.receiptTask?.cancel()
+            }
+        )
     }
 
     private func handleRealtimeMessage(_ notification: Notification, isNew: Bool) {
@@ -1757,8 +1925,14 @@ final class ChatDetailViewController: BaseViewController {
         let eventMessageID = normalizedMessageID(event.message.id)
         guard !eventMessageID.isEmpty else { return }
         if event.message.isDeletedForMe {
+            deletedForMeMessageIDs.insert(eventMessageID)
+        }
+        if deletedForMeMessageIDs.contains(eventMessageID) {
             messages.removeAll { normalizedMessageID($0.id) == eventMessageID }
-        } else if let index = messages.firstIndex(where: {
+            tableView.reloadData()
+            return
+        }
+        if let index = messages.firstIndex(where: {
             normalizedMessageID($0.id) == eventMessageID
         }) {
             guard messages[index] != event.message else { return }
@@ -1779,11 +1953,11 @@ final class ChatDetailViewController: BaseViewController {
             hideStateOverlay()
         }
 
-        if isNew, event.message.senderId != currentUser.id, !event.message.isDeletedForEveryone {
-            SocketService.shared.markRead(chatId: chat.id, messageId: event.message.id)
-        }
         if shouldFollow {
             scrollToBottom(animated: true)
+        }
+        DispatchQueue.main.async { [weak self] in
+            self?.markVisibleIncomingMessagesRead()
         }
     }
 
@@ -1964,13 +2138,17 @@ extension ChatDetailViewController: UITableViewDataSource, UITableViewDelegate {
             message: message,
             isOutgoing: message.senderId == currentUser.id,
             replyPreview: replyPreview(for: message),
-            currentUserId: currentUser.id
+            currentUserId: currentUser.id,
+            status: message.status(activeParticipantIDs: activeParticipantIDs)
         )
         return cell
     }
 
     func tableView(_ tableView: UITableView, willDisplay cell: UITableViewCell, forRowAt indexPath: IndexPath) {
         let messageID = messages[indexPath.row].id
+        DispatchQueue.main.async { [weak self] in
+            self?.markVisibleIncomingMessagesRead()
+        }
         guard !animatedMessageIDs.contains(messageID) else { return }
         animatedMessageIDs.insert(messageID)
 

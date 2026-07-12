@@ -94,12 +94,12 @@ private final class MessageReadView: UIView {
         translatesAutoresizingMaskIntoConstraints = false
         [firstCheck, secondCheck].forEach {
             $0.fillColor = UIColor.clear.cgColor
-            $0.strokeColor = ChitChatColors.chatDetailReadBlue.cgColor
             $0.lineWidth = 2.3
             $0.lineCap = .round
             $0.lineJoin = .round
             layer.addSublayer($0)
         }
+        configure(status: .sent)
     }
 
     required init?(coder: NSCoder) {
@@ -110,6 +110,15 @@ private final class MessageReadView: UIView {
         super.layoutSubviews()
         firstCheck.path = checkPath(offsetX: 0).cgPath
         secondCheck.path = checkPath(offsetX: 6).cgPath
+    }
+
+    func configure(status: MessageStatus) {
+        let color = status == .read
+            ? ChitChatColors.chatDetailReadBlue
+            : ChitChatColors.chatDetailSentTime
+        firstCheck.strokeColor = color.cgColor
+        secondCheck.strokeColor = color.cgColor
+        secondCheck.isHidden = status == .sent
     }
 
     private func checkPath(offsetX: CGFloat) -> UIBezierPath {
@@ -468,7 +477,8 @@ final class MessageBubbleCell: UITableViewCell {
         message: Message,
         isOutgoing: Bool,
         replyPreview: MessageReplyPreview?,
-        currentUserId: String
+        currentUserId: String,
+        status: MessageStatus
     ) {
         resetForConfiguration()
         configureReplyPreview(replyPreview)
@@ -481,6 +491,7 @@ final class MessageBubbleCell: UITableViewCell {
             trailingConstraint?.isActive = true
             outgoingTimeTrailing?.isActive = true
             readView.isHidden = false
+            readView.configure(status: status)
             timeLabel.textColor = ChitChatColors.chatDetailSentTime
         } else {
             leadingConstraint = bubbleView.leadingAnchor.constraint(

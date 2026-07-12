@@ -9,6 +9,7 @@ extension Notification.Name {
     static let socketMessageUpdated = Notification.Name("chitchat.socket.message.updated")
     static let socketMessageDeleted = Notification.Name("chitchat.socket.message.deleted")
     static let socketMessageReactionUpdated = Notification.Name("chitchat.socket.message.reactionUpdated")
+    static let socketMessageDelivered = Notification.Name("chitchat.socket.message.delivered")
     static let socketMessageRead = Notification.Name("chitchat.socket.message.read")
     static let socketChatUpdated = Notification.Name("chitchat.socket.chat.updated")
     static let socketTypingStarted = Notification.Name("chitchat.socket.typing.started")
@@ -171,11 +172,13 @@ final class SocketService {
         emitIfConnected("typing:stop", payload: ["chatId": chatId])
     }
 
-    func markRead(chatId: String, messageId: String) {
-        emitIfConnected(
+    func markRead(chatId: String, messageId: String) async throws -> Message {
+        let response = try await emitAcknowledgedResponse(
             "message:read",
-            payload: ["chatId": chatId, "messageId": messageId]
+            payload: ["chatId": chatId, "messageId": messageId],
+            timeout: 8
         )
+        return try Self.message(fromAcknowledgement: response)
     }
 
     func sendText(chatId: String, text: String) async throws -> Message {
@@ -399,6 +402,7 @@ final class SocketService {
             notification: .socketMessageReactionUpdated,
             on: socket
         )
+        registerMessageHandler("message:delivered", notification: .socketMessageDelivered, on: socket)
         registerMessageHandler("message:read", notification: .socketMessageRead, on: socket)
 
         socket.on("chat:updated") { [weak self] data, _ in

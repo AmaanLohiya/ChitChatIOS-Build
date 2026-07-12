@@ -79,4 +79,11 @@ final class MessageService {
             method: .delete
         )
     }
+
+    func markRead(chatId: String, messageId: String) async throws -> Message {
+        try await apiClient.request(
+            "/api/v1/chats/\(chatId)/messages/\(messageId)/read",
+            method: .post
+        )
+    }
 }
