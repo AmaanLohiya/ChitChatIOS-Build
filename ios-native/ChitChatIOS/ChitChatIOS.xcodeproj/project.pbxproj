@@ -57,6 +57,10 @@
 		H80000000000000000000001 /* CallHistory.swift in Sources */ = {isa = PBXBuildFile; fileRef = H80000000000000000000021 /* CallHistory.swift */; };
 		H80000000000000000000002 /* CallHistoryService.swift in Sources */ = {isa = PBXBuildFile; fileRef = H80000000000000000000022 /* CallHistoryService.swift */; };
 		H80000000000000000000003 /* CallHistoryCell.swift in Sources */ = {isa = PBXBuildFile; fileRef = H80000000000000000000023 /* CallHistoryCell.swift */; };
+		I90000000000000000000001 /* Status.swift in Sources */ = {isa = PBXBuildFile; fileRef = I90000000000000000000021 /* Status.swift */; };
+		I90000000000000000000002 /* StatusService.swift in Sources */ = {isa = PBXBuildFile; fileRef = I90000000000000000000022 /* StatusService.swift */; };
+		I90000000000000000000003 /* StatusCreationViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = I90000000000000000000023 /* StatusCreationViewController.swift */; };
+		I90000000000000000000004 /* StatusViewerViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = I90000000000000000000024 /* StatusViewerViewController.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -110,6 +114,10 @@
 		H80000000000000000000021 /* CallHistory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallHistory.swift; sourceTree = "<group>"; };
 		H80000000000000000000022 /* CallHistoryService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallHistoryService.swift; sourceTree = "<group>"; };
 		H80000000000000000000023 /* CallHistoryCell.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallHistoryCell.swift; sourceTree = "<group>"; };
+		I90000000000000000000021 /* Status.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Status.swift; sourceTree = "<group>"; };
+		I90000000000000000000022 /* StatusService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusService.swift; sourceTree = "<group>"; };
+		I90000000000000000000023 /* StatusCreationViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusCreationViewController.swift; sourceTree = "<group>"; };
+		I90000000000000000000024 /* StatusViewerViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusViewerViewController.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -175,6 +183,7 @@
 				B20000000000000000000023 /* Message.swift */,
 				F60000000000000000000021 /* VoiceCall.swift */,
 				H80000000000000000000021 /* CallHistory.swift */,
+				I90000000000000000000021 /* Status.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -194,6 +203,7 @@
 				F60000000000000000000025 /* CallAudioRouteManager.swift */,
 				F60000000000000000000023 /* VoiceCallService.swift */,
 				H80000000000000000000022 /* CallHistoryService.swift */,
+				I90000000000000000000022 /* StatusService.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -222,6 +232,8 @@
 				F60000000000000000000024 /* VoiceCallViewController.swift */,
 				G70000000000000000000021 /* GroupCreationViewController.swift */,
 				H80000000000000000000023 /* CallHistoryCell.swift */,
+				I90000000000000000000023 /* StatusCreationViewController.swift */,
+				I90000000000000000000024 /* StatusViewerViewController.swift */,
 			);
 			path = Screens;
 			sourceTree = "<group>";
@@ -361,6 +373,10 @@
 				H80000000000000000000001 /* CallHistory.swift in Sources */,
 				H80000000000000000000002 /* CallHistoryService.swift in Sources */,
 				H80000000000000000000003 /* CallHistoryCell.swift in Sources */,
+				I90000000000000000000001 /* Status.swift in Sources */,
+				I90000000000000000000002 /* StatusService.swift in Sources */,
+				I90000000000000000000003 /* StatusCreationViewController.swift in Sources */,
+				I90000000000000000000004 /* StatusViewerViewController.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

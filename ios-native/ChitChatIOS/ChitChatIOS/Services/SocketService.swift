@@ -24,6 +24,9 @@ extension Notification.Name {
     static let socketCallEnd = Notification.Name("chitchat.socket.call.end")
     static let socketCallBusy = Notification.Name("chitchat.socket.call.busy")
     static let socketCallHistoryUpdated = Notification.Name("chitchat.socket.call.historyUpdated")
+    static let socketStatusCreated = Notification.Name("chitchat.socket.status.created")
+    static let socketStatusDeleted = Notification.Name("chitchat.socket.status.deleted")
+    static let socketStatusViewed = Notification.Name("chitchat.socket.status.viewed")
 }
 
 struct SocketMessageEvent {
@@ -461,6 +464,34 @@ final class SocketService {
             )
             self.debug("presence:update", id: userId)
             self.notificationCenter.post(name: .socketPresenceUpdated, object: event)
+        }
+
+        socket.on("status:created") { [weak self] data, _ in
+            guard
+                let self,
+                let payload = data.first,
+                let event = Self.decode(StatusCreatedSocketEvent.self, from: payload)
+            else { return }
+            self.debug("status:created", id: event.status.id)
+            self.notificationCenter.post(name: .socketStatusCreated, object: event)
+        }
+        socket.on("status:deleted") { [weak self] data, _ in
+            guard
+                let self,
+                let payload = data.first,
+                let event = Self.decode(StatusDeletedSocketEvent.self, from: payload)
+            else { return }
+            self.debug("status:deleted", id: event.statusId)
+            self.notificationCenter.post(name: .socketStatusDeleted, object: event)
+        }
+        socket.on("status:viewed") { [weak self] data, _ in
+            guard
+                let self,
+                let payload = data.first,
+                let event = Self.decode(StatusViewedSocketEvent.self, from: payload)
+            else { return }
+            self.debug("status:viewed", id: event.statusId)
+            self.notificationCenter.post(name: .socketStatusViewed, object: event)
         }
 
         registerCallHandlers(on: socket)
