@@ -111,7 +111,7 @@ final class MainTabBarController: UITabBarController {
             selectedImage: tabImage("dot.radiowaves.left.and.right", selected: true)
         )
 
-        let calls = CallsViewController()
+        let calls = CallsViewController(currentUser: user)
         calls.tabBarItem = UITabBarItem(
             title: "Calls",
             image: tabImage("phone", selected: false),

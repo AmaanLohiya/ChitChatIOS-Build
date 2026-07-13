@@ -286,7 +286,7 @@ final class VoiceCallService: NSObject {
             } catch {
                 guard self.startupID == startupID else { return }
                 self.debug("accept failed", callId: call.callId)
-                Task { try? await SocketService.shared.sendCallReject(callId: call.callId, reason: "accept_failed") }
+                Task { try? await SocketService.shared.sendCallEnd(callId: call.callId, reason: "accept_failed") }
                 self.handleStartupFailure(error, presenter: nil)
             }
         }

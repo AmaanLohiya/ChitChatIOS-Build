@@ -23,6 +23,7 @@ extension Notification.Name {
     static let socketCallCancel = Notification.Name("chitchat.socket.call.cancel")
     static let socketCallEnd = Notification.Name("chitchat.socket.call.end")
     static let socketCallBusy = Notification.Name("chitchat.socket.call.busy")
+    static let socketCallHistoryUpdated = Notification.Name("chitchat.socket.call.historyUpdated")
 }
 
 struct SocketMessageEvent {
@@ -511,6 +512,17 @@ final class SocketService {
         registerCallStatusHandler("call:reject", notification: .socketCallReject, on: socket)
         registerCallStatusHandler("call:cancel", notification: .socketCallCancel, on: socket)
         registerCallStatusHandler("call:end", notification: .socketCallEnd, on: socket)
+
+        socket.on("call:history:updated") { [weak self] data, _ in
+            guard
+                let self,
+                let payload = data.first as? [String: Any],
+                let callValue = payload["call"],
+                let call = Self.decode(CallHistoryItem.self, from: callValue)
+            else { return }
+            self.debug("call:history:updated", id: call.callId)
+            self.notificationCenter.post(name: .socketCallHistoryUpdated, object: call)
+        }
 
         socket.on("call:busy") { [weak self] data, _ in
             guard
