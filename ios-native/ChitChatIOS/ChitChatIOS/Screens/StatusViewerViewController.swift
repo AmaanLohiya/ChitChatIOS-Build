@@ -85,6 +85,7 @@ private final class StatusViewerListViewController: BaseViewController, UITableV
 final class StatusViewerViewController: BaseViewController, UIAdaptivePresentationControllerDelegate {
     private let initialOwnerID: String
     private let ownerStatusesOnly: Bool
+    private let initialStatusID: String?
     private let statusService = StatusService()
     private let imageView = UIImageView()
     private let textLabel = UILabel()
@@ -114,9 +115,10 @@ final class StatusViewerViewController: BaseViewController, UIAdaptivePresentati
     private var observers: [NSObjectProtocol] = []
     private var imageTask: URLSessionDataTask?
 
-    init(ownerID: String, ownerStatusesOnly: Bool = false) {
+    init(ownerID: String, ownerStatusesOnly: Bool = false, initialStatusID: String? = nil) {
         initialOwnerID = ownerID
         self.ownerStatusesOnly = ownerStatusesOnly
+        self.initialStatusID = initialStatusID
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -135,7 +137,7 @@ final class StatusViewerViewController: BaseViewController, UIAdaptivePresentati
         view.backgroundColor = .black
         buildUI()
         observeLifecycleAndRealtime()
-        loadGroups(preservingCurrentStatusID: nil)
+        loadGroups(preservingCurrentStatusID: initialStatusID)
     }
 
     override func viewDidDisappear(_ animated: Bool) {

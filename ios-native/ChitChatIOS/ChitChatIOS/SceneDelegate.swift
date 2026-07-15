@@ -38,10 +38,19 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
                 case .signedIn(let user):
                     navigationController.setViewControllers([MainTabBarController(user: user)], animated: true)
                 }
+                NotificationRouter.shared.flushIfReady()
             }
         }
 
         navigationController.setViewControllers([SplashViewController()], animated: false)
+        if let response = connectionOptions.notificationResponse {
+            Task { @MainActor in
+                NotificationRouter.shared.handle(
+                    userInfo: response.notification.request.content.userInfo,
+                    responseIdentifier: response.notification.request.identifier
+                )
+            }
+        }
         Task { await sessionManager.restoreSession() }
     }
 

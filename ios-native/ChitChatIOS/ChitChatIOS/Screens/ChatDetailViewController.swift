@@ -418,6 +418,7 @@ private final class DocumentPreviewDataSource: NSObject, QLPreviewControllerData
 }
 
 final class ChatDetailViewController: BaseViewController {
+    var notificationChatID: String { chat.id }
     private static let quickReactions = ["👍", "❤️", "😂", "😮", "😢", "🙏"]
 
     private static let typingRefreshInterval: TimeInterval = 1.2
@@ -2146,9 +2147,11 @@ final class ChatDetailViewController: BaseViewController {
                 guard let self else { return }
                 self.isApplicationActive = true
                 self.clearRemoteTypingUsers()
-                SocketService.shared.joinChat(self.chat.id)
                 self.refreshChatPresence()
-                self.markVisibleIncomingMessagesRead()
+                if self.isViewVisible {
+                    SocketService.shared.joinChat(self.chat.id)
+                    self.markVisibleIncomingMessagesRead()
+                }
             }
         )
         socketObservers.append(
@@ -2158,6 +2161,9 @@ final class ChatDetailViewController: BaseViewController {
                 self?.stopLocalTyping()
                 self?.clearRemoteTypingUsers()
                 self?.receiptTask?.cancel()
+                if let chatID = self?.chat.id {
+                    SocketService.shared.leaveChat(chatID)
+                }
             }
         )
     }

@@ -22,6 +22,7 @@ final class SessionManager {
             case .signedIn:
                 if let accessToken, !accessToken.isEmpty {
                     SocketService.shared.connect(accessToken: accessToken)
+                    PushNotificationService.shared.registerIfAuthorized()
                 }
             case .profileSetup:
                 SocketService.shared.disconnect()
@@ -174,6 +175,7 @@ final class SessionManager {
 
     func logout() async {
         let currentSessionId = sessionId
+        await PushNotificationService.shared.deactivateCurrentInstallation()
         do {
             try await authService.logout(sessionId: currentSessionId)
         } catch {

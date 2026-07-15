@@ -78,8 +78,16 @@ final class SettingsViewController: BaseViewController {
             makeRow(symbol: "shield", title: "Security", value: "Two-step verification, passcode lock")
         ]))
         content.addArrangedSubview(makeSectionTitle("APP"))
+        let notificationsRow = makeRow(
+            symbol: "bell",
+            title: "Notifications",
+            value: "Messages, status updates and previews"
+        )
+        notificationsRow.addGestureRecognizer(
+            UITapGestureRecognizer(target: self, action: #selector(openNotificationSettings))
+        )
         content.addArrangedSubview(makeRowsCard([
-            makeRow(symbol: "bell", title: "Notifications", value: "Message, group & call tones"),
+            notificationsRow,
             makeRow(symbol: "message", title: "Chats", value: "Theme, wallpapers, chat history"),
             makeRow(symbol: "externaldrive", title: "Storage and data", value: "367 MB used")
         ]))
@@ -410,6 +418,10 @@ final class SettingsViewController: BaseViewController {
     @objc private func openProfile() {
         let profileUser = SessionManager.shared.authenticatedUser ?? user
         navigationController?.pushViewController(ProfileViewController(user: profileUser), animated: true)
+    }
+
+    @objc private func openNotificationSettings() {
+        navigationController?.pushViewController(NotificationSettingsViewController(), animated: true)
     }
 
     @objc private func confirmLogout() {
