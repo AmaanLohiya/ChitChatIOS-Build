@@ -13,6 +13,14 @@ private final class StatusOwnerControl: UIControl {
     }
 }
 
+private final class StatusAddButton: UIButton {
+    override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
+        let horizontalInset = max(0, (44 - bounds.width) / 2)
+        let verticalInset = max(0, (44 - bounds.height) / 2)
+        return bounds.insetBy(dx: -horizontalInset, dy: -verticalInset).contains(point)
+    }
+}
+
 final class UpdatesViewController: BaseViewController {
     private let initialUser: User
     private let statusService = StatusService()
@@ -411,16 +419,18 @@ final class UpdatesViewController: BaseViewController {
     }
 
     private func addPlusBadge(to container: UIView, anchoredTo avatar: UIView, size: CGFloat) {
-        let badge = UILabel()
+        let badge = StatusAddButton(type: .custom)
         badge.translatesAutoresizingMaskIntoConstraints = false
-        badge.text = "+"
-        badge.textAlignment = .center
-        badge.font = UIFont.systemFont(ofSize: size * 0.68, weight: .bold)
-        badge.textColor = .white
+        badge.setTitle("+", for: .normal)
+        badge.setTitleColor(.white, for: .normal)
+        badge.titleLabel?.font = UIFont.systemFont(ofSize: size * 0.68, weight: .bold)
         badge.backgroundColor = ChitChatColors.accent
         badge.layer.cornerRadius = size / 2
         badge.clipsToBounds = true
+        badge.accessibilityLabel = "Add status"
+        badge.addTarget(self, action: #selector(createTapped), for: .touchUpInside)
         container.addSubview(badge)
+        container.bringSubviewToFront(badge)
         NSLayoutConstraint.activate([
             badge.trailingAnchor.constraint(equalTo: avatar.trailingAnchor, constant: 2),
             badge.bottomAnchor.constraint(equalTo: avatar.bottomAnchor, constant: 1),
@@ -554,16 +564,22 @@ final class UpdatesViewController: BaseViewController {
 
     @objc private func ownerTapped(_ sender: UIControl) {
         guard let sender = sender as? StatusOwnerControl else { return }
-        if sender.ownerID == currentUser.id, mine == nil {
-            presentCreation()
-            return
+        let viewer: StatusViewerViewController
+        if sender.ownerID == currentUser.id {
+            guard mine != nil else {
+                presentCreation()
+                return
+            }
+            viewer = StatusViewerViewController(ownerID: sender.ownerID, ownerStatusesOnly: true)
+        } else {
+            viewer = StatusViewerViewController(ownerID: sender.ownerID)
         }
-        let viewer = StatusViewerViewController(ownerID: sender.ownerID)
         viewer.modalPresentationStyle = .fullScreen
         present(viewer, animated: true)
     }
 
     private func presentCreation() {
+        guard presentedViewController == nil else { return }
         let controller = StatusCreationViewController()
         controller.onCreated = { [weak self] in self?.loadStatuses(showSpinner: false) }
         let navigation = UINavigationController(rootViewController: controller)

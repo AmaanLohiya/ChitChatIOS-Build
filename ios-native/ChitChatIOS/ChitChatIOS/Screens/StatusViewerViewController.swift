@@ -84,6 +84,7 @@ private final class StatusViewerListViewController: BaseViewController, UITableV
 
 final class StatusViewerViewController: BaseViewController, UIAdaptivePresentationControllerDelegate {
     private let initialOwnerID: String
+    private let ownerStatusesOnly: Bool
     private let statusService = StatusService()
     private let imageView = UIImageView()
     private let textLabel = UILabel()
@@ -113,8 +114,9 @@ final class StatusViewerViewController: BaseViewController, UIAdaptivePresentati
     private var observers: [NSObjectProtocol] = []
     private var imageTask: URLSessionDataTask?
 
-    init(ownerID: String) {
+    init(ownerID: String, ownerStatusesOnly: Bool = false) {
         initialOwnerID = ownerID
+        self.ownerStatusesOnly = ownerStatusesOnly
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -157,7 +159,7 @@ final class StatusViewerViewController: BaseViewController, UIAdaptivePresentati
     }
 
     private var isOwner: Bool {
-        currentGroup?.owner.id == SessionManager.shared.authenticatedUser?.id
+        ownerStatusesOnly || currentGroup?.owner.id == SessionManager.shared.authenticatedUser?.id
     }
 
     private func buildUI() {
@@ -334,11 +336,14 @@ final class StatusViewerViewController: BaseViewController, UIAdaptivePresentati
                 }
             }
             do {
-                async let feedRequest = self.statusService.feed()
-                async let mineRequest = self.statusService.mine()
-                let (feed, mine) = try await (feedRequest, mineRequest)
-                let combined = (mine.statuses.isEmpty ? [] : [mine]) + feed
-                self.groups = self.normalize(combined)
+                let loadedGroups: [StatusGroup]
+                if self.ownerStatusesOnly {
+                    let mine = try await self.statusService.mine()
+                    loadedGroups = mine.statuses.isEmpty ? [] : [mine]
+                } else {
+                    loadedGroups = try await self.statusService.feed()
+                }
+                self.groups = self.normalize(loadedGroups)
                 guard !self.groups.isEmpty else {
                     self.dismiss(animated: true)
                     return
@@ -348,16 +353,23 @@ final class StatusViewerViewController: BaseViewController, UIAdaptivePresentati
                    let location = self.findStatus(statusID) {
                     self.groupIndex = location.group
                     self.statusIndex = location.status
-                } else if let target = self.groups.firstIndex(where: { $0.owner.id == self.initialOwnerID }) {
+                } else {
+                    let targetIndex: Int?
+                    if self.ownerStatusesOnly {
+                        targetIndex = self.groups.indices.first
+                    } else {
+                        targetIndex = self.groups.firstIndex(where: { $0.owner.id == self.initialOwnerID })
+                    }
+                    guard let target = targetIndex else {
+                        self.dismiss(animated: true)
+                        return
+                    }
                     self.groupIndex = target
                     let statuses = self.groups[target].statuses
                     let firstUnseen = statuses.firstIndex(where: { !$0.hasViewed })
-                    self.statusIndex = self.groups[target].owner.id == SessionManager.shared.authenticatedUser?.id
+                    self.statusIndex = self.ownerStatusesOnly
                         ? 0
                         : firstUnseen ?? 0
-                } else {
-                    self.dismiss(animated: true)
-                    return
                 }
                 self.displayCurrentStatus()
             } catch {
