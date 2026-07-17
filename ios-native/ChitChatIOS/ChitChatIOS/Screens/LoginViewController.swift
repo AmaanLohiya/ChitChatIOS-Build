@@ -24,7 +24,6 @@ final class LoginViewController: BaseViewController, UITextFieldDelegate {
     private let phoneField = RoundedTextField(placeholder: "Phone number", keyboardType: .phonePad)
     private let continueButton = PrimaryButton(title: "Continue")
     private let errorLabel = UILabel()
-    private let devOtpLabel = UILabel()
     private var isSubmitting = false
 
     init() {
@@ -67,7 +66,7 @@ final class LoginViewController: BaseViewController, UITextFieldDelegate {
         content.spacing = 0
 
         let copy = UILabel()
-        copy.text = "ChitChat will send an SMS message to verify your phone number."
+        copy.text = "ChitChat will prepare a verification code for your phone number."
         copy.font = ChitChatTypography.body
         copy.textColor = ChitChatColors.textMuted
         copy.numberOfLines = 0
@@ -140,11 +139,6 @@ final class LoginViewController: BaseViewController, UITextFieldDelegate {
         errorLabel.numberOfLines = 0
         errorLabel.isHidden = true
 
-        devOtpLabel.font = ChitChatTypography.caption
-        devOtpLabel.textColor = ChitChatColors.accent
-        devOtpLabel.numberOfLines = 0
-        devOtpLabel.isHidden = true
-
         continueButton.addTarget(self, action: #selector(handleContinue), for: .touchUpInside)
 
         content.addArrangedSubview(copyBlock)
@@ -155,7 +149,6 @@ final class LoginViewController: BaseViewController, UITextFieldDelegate {
         content.setCustomSpacing(10, after: phoneRow)
         content.addArrangedSubview(errorLabel)
         content.setCustomSpacing(6, after: errorLabel)
-        content.addArrangedSubview(devOtpLabel)
 
         view.addSubview(header)
         view.addSubview(scrollView)
@@ -280,18 +273,25 @@ final class LoginViewController: BaseViewController, UITextFieldDelegate {
 
         isSubmitting = true
         continueButton.isEnabled = false
-        continueButton.setTitle("Sending...", for: .normal)
+        continueButton.setTitle("Preparing...", for: .normal)
         setError(nil)
-        devOtpLabel.isHidden = true
-
         Task {
             do {
                 let result = try await sessionManager.requestOtp(phone: phone)
                 await MainActor.run {
+                    guard result.deliveryMode != .demo || result.otp?.count == 6 else {
+                        self.setError("The demo verification code is unavailable. Please try again.")
+                        self.isSubmitting = false
+                        self.continueButton.setTitle("Continue", for: .normal)
+                        self.updateContinueState()
+                        return
+                    }
                     let otpController = OTPViewController(
                         phone: phone,
                         otpRequestId: result.otpRequestId,
-                        devOtp: result.otp
+                        deliveryMode: result.deliveryMode,
+                        demoOtp: result.deliveryMode == .demo ? result.otp : nil,
+                        resendAvailableAt: result.resendAvailableAt
                     )
                     self.navigationController?.pushViewController(otpController, animated: true)
                     self.isSubmitting = false

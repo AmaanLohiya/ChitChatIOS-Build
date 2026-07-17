@@ -1,27 +1,49 @@
 import UIKit
 
+private func parseOtpTimestamp(_ value: String) -> Date? {
+    let fractional = ISO8601DateFormatter()
+    fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    if let date = fractional.date(from: value) {
+        return date
+    }
+    return ISO8601DateFormatter().date(from: value)
+}
+
 final class OTPViewController: BaseViewController, UITextFieldDelegate {
     private let phone: String
     private var otpRequestId: String
-    private var devOtp: String?
+    private var deliveryMode: OtpDeliveryMode
+    private var demoOtp: String?
+    private var resendAvailableAt: Date
     private let sessionManager = SessionManager.shared
     private var timer: Timer?
     private var secondsRemaining = 60
     private var isVerifying = false
+    private var isResending = false
     private var didFocusFirstField = false
 
     private var otpFields: [UITextField] = []
     private let timerLabel = UILabel()
     private let resendButton = UIButton(type: .system)
     private let errorLabel = UILabel()
-    private let devOtpLabel = UILabel()
+    private let demoOtpStack = UIStackView()
+    private let demoOtpLabel = UILabel()
+    private let copyDemoOtpButton = UIButton(type: .system)
     private let loader = UIActivityIndicatorView(style: .medium)
     private let verifyButton = PrimaryButton(title: "Verify")
 
-    init(phone: String, otpRequestId: String, devOtp: String?) {
+    init(
+        phone: String,
+        otpRequestId: String,
+        deliveryMode: OtpDeliveryMode,
+        demoOtp: String?,
+        resendAvailableAt: String
+    ) {
         self.phone = phone
         self.otpRequestId = otpRequestId
-        self.devOtp = devOtp
+        self.deliveryMode = deliveryMode
+        self.demoOtp = demoOtp
+        self.resendAvailableAt = parseOtpTimestamp(resendAvailableAt) ?? Date().addingTimeInterval(60)
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -72,7 +94,7 @@ final class OTPViewController: BaseViewController, UITextFieldDelegate {
         stack.spacing = 0
 
         let copy = UILabel()
-        copy.text = "Enter the 6-digit code sent to"
+        copy.text = deliveryMode == .demo ? "Demo verification for" : "Enter the 6-digit code sent to"
         copy.font = ChitChatTypography.body
         copy.textColor = ChitChatColors.textMuted
         copy.textAlignment = .center
@@ -133,12 +155,49 @@ final class OTPViewController: BaseViewController, UITextFieldDelegate {
         resendButton.addTarget(self, action: #selector(resendCode), for: .touchUpInside)
         resendButton.isHidden = true
 
-        devOtpLabel.font = ChitChatTypography.caption
-        devOtpLabel.textColor = ChitChatColors.accent
-        devOtpLabel.textAlignment = .center
-        devOtpLabel.numberOfLines = 0
-        devOtpLabel.text = devOtp.map { "Development OTP: \($0)" }
-        devOtpLabel.isHidden = devOtp == nil
+        let demoTitle = UILabel()
+        demoTitle.text = "Demo OTP"
+        demoTitle.font = ChitChatTypography.caption
+        demoTitle.textColor = ChitChatColors.textMuted
+        demoTitle.textAlignment = .center
+
+        demoOtpLabel.font = UIFont.monospacedDigitSystemFont(ofSize: 24, weight: .bold)
+        demoOtpLabel.textColor = ChitChatColors.textPrimary
+        demoOtpLabel.textAlignment = .center
+
+        copyDemoOtpButton.setTitle("Copy", for: .normal)
+        copyDemoOtpButton.setTitleColor(ChitChatColors.accent, for: .normal)
+        copyDemoOtpButton.titleLabel?.font = ChitChatTypography.caption
+        copyDemoOtpButton.layer.cornerRadius = 10
+        copyDemoOtpButton.layer.borderWidth = 1
+        copyDemoOtpButton.layer.borderColor = ChitChatColors.accent.cgColor
+        copyDemoOtpButton.contentEdgeInsets = UIEdgeInsets(top: 7, left: 12, bottom: 7, right: 12)
+        copyDemoOtpButton.addTarget(self, action: #selector(copyDemoOtp), for: .touchUpInside)
+
+        let demoCodeRow = UIStackView(arrangedSubviews: [demoOtpLabel, copyDemoOtpButton])
+        demoCodeRow.axis = .horizontal
+        demoCodeRow.alignment = .center
+        demoCodeRow.spacing = 12
+
+        let demoMessage = UILabel()
+        demoMessage.text = "No SMS was sent. Use this code to continue."
+        demoMessage.font = ChitChatTypography.caption
+        demoMessage.textColor = ChitChatColors.textMuted
+        demoMessage.textAlignment = .center
+        demoMessage.numberOfLines = 0
+
+        demoOtpStack.axis = .vertical
+        demoOtpStack.alignment = .center
+        demoOtpStack.spacing = 7
+        demoOtpStack.isLayoutMarginsRelativeArrangement = true
+        demoOtpStack.layoutMargins = UIEdgeInsets(top: 14, left: 16, bottom: 14, right: 16)
+        demoOtpStack.backgroundColor = ChitChatColors.surface
+        demoOtpStack.layer.cornerRadius = 16
+        demoOtpStack.layer.borderWidth = 1
+        demoOtpStack.layer.borderColor = ChitChatColors.accent.withAlphaComponent(0.35).cgColor
+        demoOtpStack.addArrangedSubview(demoTitle)
+        demoOtpStack.addArrangedSubview(demoCodeRow)
+        demoOtpStack.addArrangedSubview(demoMessage)
 
         errorLabel.font = ChitChatTypography.caption
         errorLabel.textColor = UIColor(hex: "#EF8F8F")
@@ -152,14 +211,14 @@ final class OTPViewController: BaseViewController, UITextFieldDelegate {
         verifyButton.addTarget(self, action: #selector(verifyOtp), for: .touchUpInside)
 
         stack.addArrangedSubview(copyStack)
-        stack.setCustomSpacing(34, after: copyStack)
+        stack.setCustomSpacing(24, after: copyStack)
+        stack.addArrangedSubview(demoOtpStack)
+        stack.setCustomSpacing(24, after: demoOtpStack)
         stack.addArrangedSubview(otpRow)
-        stack.setCustomSpacing(38, after: otpRow)
+        stack.setCustomSpacing(30, after: otpRow)
         stack.addArrangedSubview(timerLabel)
         stack.addArrangedSubview(resendButton)
-        stack.setCustomSpacing(10, after: resendButton)
-        stack.addArrangedSubview(devOtpLabel)
-        stack.setCustomSpacing(8, after: devOtpLabel)
+        stack.setCustomSpacing(8, after: resendButton)
         stack.addArrangedSubview(errorLabel)
         stack.setCustomSpacing(18, after: errorLabel)
         stack.addArrangedSubview(loader)
@@ -198,6 +257,7 @@ final class OTPViewController: BaseViewController, UITextFieldDelegate {
             stack.bottomAnchor.constraint(equalTo: scrollView.contentLayoutGuide.bottomAnchor, constant: -20),
 
             otpRow.widthAnchor.constraint(lessThanOrEqualTo: stack.widthAnchor),
+            demoOtpStack.widthAnchor.constraint(equalTo: stack.widthAnchor),
 
             verifyButton.leadingAnchor.constraint(
                 equalTo: view.leadingAnchor,
@@ -214,12 +274,12 @@ final class OTPViewController: BaseViewController, UITextFieldDelegate {
             keyboardBottom
         ])
 
+        updateDemoOtpUI()
         updateTimerUI()
     }
 
     private func startTimer() {
         timer?.invalidate()
-        secondsRemaining = 60
         updateTimerUI()
         timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             guard let self else { return }
@@ -232,9 +292,17 @@ final class OTPViewController: BaseViewController, UITextFieldDelegate {
     }
 
     private func updateTimerUI() {
+        secondsRemaining = max(Int(ceil(resendAvailableAt.timeIntervalSinceNow)), 0)
         timerLabel.text = "Resend code in \(secondsRemaining)s"
         timerLabel.isHidden = secondsRemaining == 0
         resendButton.isHidden = secondsRemaining != 0
+        resendButton.isEnabled = !isResending && !isVerifying
+    }
+
+    private func updateDemoOtpUI() {
+        let shouldShow = deliveryMode == .demo && !(demoOtp ?? "").isEmpty
+        demoOtpStack.isHidden = !shouldShow
+        demoOtpLabel.text = shouldShow ? demoOtp : nil
     }
 
     private func updateVerifyState() {
@@ -290,6 +358,15 @@ final class OTPViewController: BaseViewController, UITextFieldDelegate {
         verifyOtp()
     }
 
+    @objc private func copyDemoOtp() {
+        guard deliveryMode == .demo, let demoOtp, !demoOtp.isEmpty else { return }
+        UIPasteboard.general.string = demoOtp
+        copyDemoOtpButton.setTitle("Copied", for: .normal)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in
+            self?.copyDemoOtpButton.setTitle("Copy", for: .normal)
+        }
+    }
+
     @objc private func verifyOtp() {
         guard !isVerifying else { return }
         guard code().count == 6 else {
@@ -330,7 +407,9 @@ final class OTPViewController: BaseViewController, UITextFieldDelegate {
     }
 
     @objc private func resendCode() {
-        guard !isVerifying else { return }
+        guard !isVerifying, !isResending, secondsRemaining == 0 else { return }
+        isResending = true
+        resendButton.isEnabled = false
         setError(nil)
         loader.startAnimating()
         Task {
@@ -338,19 +417,24 @@ final class OTPViewController: BaseViewController, UITextFieldDelegate {
                 let result = try await sessionManager.requestOtp(phone: phone)
                 await MainActor.run {
                     self.otpRequestId = result.otpRequestId
-                    self.devOtp = result.otp
-                    self.devOtpLabel.text = result.otp.map { "Development OTP: \($0)" }
-                    self.devOtpLabel.isHidden = result.otp == nil
+                    self.deliveryMode = result.deliveryMode
+                    self.demoOtp = result.deliveryMode == .demo ? result.otp : nil
+                    self.resendAvailableAt = parseOtpTimestamp(result.resendAvailableAt)
+                        ?? Date().addingTimeInterval(60)
+                    self.updateDemoOtpUI()
                     self.otpFields.forEach { $0.text = "" }
                     self.otpFields.first?.becomeFirstResponder()
+                    self.isResending = false
                     self.startTimer()
                     self.loader.stopAnimating()
                     self.updateVerifyState()
                 }
             } catch {
                 await MainActor.run {
+                    self.isResending = false
                     self.loader.stopAnimating()
                     self.setError(error.localizedDescription)
+                    self.updateTimerUI()
                 }
             }
         }

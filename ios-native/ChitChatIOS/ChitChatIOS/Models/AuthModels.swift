@@ -34,9 +34,16 @@ struct RequestOtpRequest: Encodable {
     let phone: String
 }
 
+enum OtpDeliveryMode: String, Codable {
+    case demo
+    case sms
+}
+
 struct RequestOtpResponse: Codable {
     let otpRequestId: String
     let expiresAt: String
+    let resendAvailableAt: String
+    let deliveryMode: OtpDeliveryMode
     let otp: String?
 }
 
