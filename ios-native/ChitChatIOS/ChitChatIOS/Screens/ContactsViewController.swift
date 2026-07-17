@@ -342,7 +342,7 @@ final class ContactsViewController: BaseViewController {
 
         let inviteSubtitle = UILabel()
         inviteSubtitle.translatesAutoresizingMaskIntoConstraints = false
-        inviteSubtitle.text = "Share ChatApp with your contacts"
+        inviteSubtitle.text = "Share ChitChat with your contacts"
         inviteSubtitle.font = ChitChatTypography.contactsInviteSubtitle
         inviteSubtitle.textColor = ChitChatColors.textMuted
 
@@ -785,7 +785,7 @@ final class ContactsViewController: BaseViewController {
     }
 
     @objc private func inviteFriends() {
-        let message = "Join me on ChatApp: https://chatapp.example/invite"
+        let message = "Join me on ChitChat."
         let controller = UIActivityViewController(activityItems: [message], applicationActivities: nil)
         if let popover = controller.popoverPresentationController {
             popover.sourceView = inviteRow

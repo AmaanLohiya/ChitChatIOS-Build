@@ -16,6 +16,22 @@ final class SettingsViewController: BaseViewController {
         return nil
     }
 
+    private var runtimeVersionText: String {
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String
+
+        if let version, !version.isEmpty, let build, !build.isEmpty {
+            return "Version \(version) (\(build))"
+        }
+        if let version, !version.isEmpty {
+            return "Version \(version)"
+        }
+        if let build, !build.isEmpty {
+            return "Build \(build)"
+        }
+        return "Version unavailable"
+    }
+
     override func viewDidLoad() {
         super.viewDidLoad()
         navigationController?.setNavigationBarHidden(true, animated: false)
@@ -94,7 +110,7 @@ final class SettingsViewController: BaseViewController {
         content.addArrangedSubview(makeSectionTitle("SUPPORT"))
         content.addArrangedSubview(makeRowsCard([
             makeRow(symbol: "questionmark.circle", title: "Help", value: "Help center, contact us"),
-            makeRow(symbol: "info.circle", title: "About", value: "Version 2.26.9")
+            makeRow(symbol: "info.circle", title: "About", value: runtimeVersionText)
         ]))
         let logoutCard = makeRowsCard([
             makeRow(symbol: "rectangle.portrait.and.arrow.right", title: "Log out", value: "Sign out of your account")

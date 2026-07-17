@@ -2,8 +2,6 @@ import UIKit
 
 private final class ChitChatTabBar: UITabBar {
     private let activeIndicator = UIView()
-    private let chatsBadge = UIView()
-    private let chatsBadgeLabel = UILabel()
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -12,17 +10,6 @@ private final class ChitChatTabBar: UITabBar {
         activeIndicator.isUserInteractionEnabled = false
         addSubview(activeIndicator)
 
-        chatsBadge.backgroundColor = ChitChatColors.accent
-        chatsBadge.layer.cornerRadius = 11
-        chatsBadge.isUserInteractionEnabled = false
-
-        chatsBadgeLabel.frame = CGRect(x: 0, y: 0, width: 21, height: 21)
-        chatsBadgeLabel.text = "3"
-        chatsBadgeLabel.textColor = ChitChatColors.backgroundAlt
-        chatsBadgeLabel.font = ChitChatTypography.chatsUnread
-        chatsBadgeLabel.textAlignment = .center
-        chatsBadge.addSubview(chatsBadgeLabel)
-        addSubview(chatsBadge)
     }
 
     required init?(coder: NSCoder) {
@@ -58,15 +45,8 @@ private final class ChitChatTabBar: UITabBar {
             width: indicatorWidth,
             height: 49
         )
-        chatsBadge.frame = CGRect(
-            x: tabButtons[0].frame.midX + 17,
-            y: 8,
-            width: 21,
-            height: 21
-        )
         activeIndicator.isHidden = false
         insertSubview(activeIndicator, belowSubview: tabButtons[0])
-        bringSubviewToFront(chatsBadge)
     }
 }
 
