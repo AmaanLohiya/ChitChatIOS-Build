@@ -53,6 +53,7 @@
 		F60000000000000000000004 /* VoiceCallViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = F60000000000000000000024 /* VoiceCallViewController.swift */; };
 		F60000000000000000000005 /* WebRTC in Frameworks */ = {isa = PBXBuildFile; productRef = F60000000000000000000031 /* WebRTC */; };
 		F60000000000000000000006 /* CallAudioRouteManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = F60000000000000000000025 /* CallAudioRouteManager.swift */; };
+		F60000000000000000000007 /* VideoCallViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = F60000000000000000000026 /* VideoCallViewController.swift */; };
 		G70000000000000000000001 /* GroupCreationViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = G70000000000000000000021 /* GroupCreationViewController.swift */; };
 		H80000000000000000000001 /* CallHistory.swift in Sources */ = {isa = PBXBuildFile; fileRef = H80000000000000000000021 /* CallHistory.swift */; };
 		H80000000000000000000002 /* CallHistoryService.swift in Sources */ = {isa = PBXBuildFile; fileRef = H80000000000000000000022 /* CallHistoryService.swift */; };
@@ -114,6 +115,7 @@
 		F60000000000000000000023 /* VoiceCallService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceCallService.swift; sourceTree = "<group>"; };
 		F60000000000000000000024 /* VoiceCallViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceCallViewController.swift; sourceTree = "<group>"; };
 		F60000000000000000000025 /* CallAudioRouteManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallAudioRouteManager.swift; sourceTree = "<group>"; };
+		F60000000000000000000026 /* VideoCallViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VideoCallViewController.swift; sourceTree = "<group>"; };
 		G70000000000000000000021 /* GroupCreationViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GroupCreationViewController.swift; sourceTree = "<group>"; };
 		H80000000000000000000021 /* CallHistory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallHistory.swift; sourceTree = "<group>"; };
 		H80000000000000000000022 /* CallHistoryService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallHistoryService.swift; sourceTree = "<group>"; };
@@ -245,6 +247,7 @@
 				C30000000000000000000023 /* UpdatesViewController.swift */,
 				C30000000000000000000024 /* CallsViewController.swift */,
 				F60000000000000000000024 /* VoiceCallViewController.swift */,
+				F60000000000000000000026 /* VideoCallViewController.swift */,
 				G70000000000000000000021 /* GroupCreationViewController.swift */,
 				H80000000000000000000023 /* CallHistoryCell.swift */,
 				I90000000000000000000023 /* StatusCreationViewController.swift */,
@@ -385,6 +388,7 @@
 				F60000000000000000000006 /* CallAudioRouteManager.swift in Sources */,
 				F60000000000000000000003 /* VoiceCallService.swift in Sources */,
 				F60000000000000000000004 /* VoiceCallViewController.swift in Sources */,
+				F60000000000000000000007 /* VideoCallViewController.swift in Sources */,
 				G70000000000000000000001 /* GroupCreationViewController.swift in Sources */,
 				H80000000000000000000001 /* CallHistory.swift in Sources */,
 				H80000000000000000000002 /* CallHistoryService.swift in Sources */,

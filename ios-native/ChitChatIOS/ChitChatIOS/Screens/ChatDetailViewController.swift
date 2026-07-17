@@ -607,7 +607,7 @@ final class ChatDetailViewController: BaseViewController {
             color: ChitChatColors.accent,
             accessibilityLabel: "Video call"
         )
-        videoButton.addTarget(self, action: #selector(showVideoComingSoon), for: .touchUpInside)
+        videoButton.addTarget(self, action: #selector(startVideoCall), for: .touchUpInside)
         let phoneButton = makeHeaderAction(
             symbol: "phone",
             color: ChitChatColors.accent,
@@ -2374,8 +2374,20 @@ final class ChatDetailViewController: BaseViewController {
         )
     }
 
-    @objc private func showVideoComingSoon() {
-        showAlert(message: "Video calls are coming later.")
+    @objc private func startVideoCall() {
+        guard chat.type == .direct else {
+            showAlert(message: "Video calls are available only in direct chats.")
+            return
+        }
+        guard chat.otherParticipant(viewerUserId: currentUser.id) != nil else {
+            showAlert(message: "Video calls are available only in direct chats.")
+            return
+        }
+        VoiceCallService.shared.startOutgoingVideoCall(
+            chat: chat,
+            currentUser: currentUser,
+            presenter: self
+        )
     }
 }
 

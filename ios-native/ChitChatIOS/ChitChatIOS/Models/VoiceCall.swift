@@ -111,6 +111,7 @@ enum VoiceCallPresentationStatus: Equatable {
 }
 
 struct VoiceCallPresentationState: Equatable {
+    let callType: VoiceCallType
     let direction: VoiceCallDirection
     let status: VoiceCallPresentationStatus
     let callId: String?
@@ -122,6 +123,10 @@ struct VoiceCallPresentationState: Equatable {
     let connectedAt: Date?
     let isMuted: Bool
     let isSpeakerOn: Bool
+    let isCameraEnabled: Bool
+    let isUsingFrontCamera: Bool
+    let hasLocalVideo: Bool
+    let hasRemoteVideo: Bool
     let audioRouteName: String
     let audioRouteIconName: String
 }

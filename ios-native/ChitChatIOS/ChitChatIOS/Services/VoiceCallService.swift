@@ -1,22 +1,26 @@
 ﻿import Foundation
 import UIKit
+import AVFoundation
+import CoreMedia
 import WebRTC
 
-private enum VoiceCallServiceError: LocalizedError {
+private enum VoiceCallServiceError: LocalizedError, Equatable {
     case groupCallsUnsupported
     case missingParticipant
     case alreadyInCall
     case socketUnavailable
     case invalidSignal
-    case unsupportedVideo
     case microphonePermissionDenied
+    case cameraPermissionDenied
+    case cameraUnavailable
+    case videoCaptureFailed
     case peerConnectionUnavailable
     case presentationUnavailable
 
     var errorDescription: String? {
         switch self {
         case .groupCallsUnsupported:
-            return "Group voice calls are coming later."
+            return "Group calls are available later."
         case .missingParticipant:
             return "Unable to find the person for this call."
         case .alreadyInCall:
@@ -25,16 +29,26 @@ private enum VoiceCallServiceError: LocalizedError {
             return "Realtime connection is unavailable."
         case .invalidSignal:
             return "Call setup data was invalid."
-        case .unsupportedVideo:
-            return "Video calls are coming later."
         case .microphonePermissionDenied:
-            return "Microphone permission is required for voice calls."
+            return "Microphone permission is required for calls."
+        case .cameraPermissionDenied:
+            return "Camera permission is required for video calls."
+        case .cameraUnavailable:
+            return "Camera is unavailable on this device."
+        case .videoCaptureFailed:
+            return "Could not start the camera."
         case .peerConnectionUnavailable:
-            return "Could not create the voice connection."
+            return "Could not create the call connection."
         case .presentationUnavailable:
             return "The call screen could not be presented."
         }
     }
+}
+
+private struct CameraCaptureConfiguration {
+    let device: AVCaptureDevice
+    let format: AVCaptureDevice.Format
+    let fps: Int
 }
 
 final class VoiceCallService: NSObject {
@@ -54,8 +68,15 @@ final class VoiceCallService: NSObject {
     private var currentCall: VoiceCall?
     private var currentParticipant: VoiceCallParticipant?
     private var direction: VoiceCallDirection = .outgoing
+    private var activeCallType: VoiceCallType = .voice
     private var peerConnection: RTCPeerConnection?
     private var localAudioTrack: RTCAudioTrack?
+    private var localVideoSource: RTCVideoSource?
+    private var cameraCapturer: RTCCameraVideoCapturer?
+    private var localVideoTrack: RTCVideoTrack?
+    private var remoteVideoTrack: RTCVideoTrack?
+    private weak var localVideoRenderer: RTCVideoRenderer?
+    private weak var remoteVideoRenderer: RTCVideoRenderer?
     private var pendingOffer: [String: Any]?
     private var queuedLocalIceCandidates: [[String: Any]] = []
     private var queuedRemoteIceCandidates: [[String: Any]] = []
@@ -64,9 +85,14 @@ final class VoiceCallService: NSObject {
     private var callConnectedAt: Date?
     private var isMuted = false
     private var isSpeakerOn = false
+    private var isCameraEnabled = true
+    private var isUsingFrontCamera = true
+    private var isCameraCapturing = false
+    private var isSwitchingCamera = false
     private var isStartingCall = false
     private var startupID: UUID?
     private weak var callViewController: VoiceCallViewController?
+    private weak var videoCallViewController: VideoCallViewController?
 
     private override init() {
         super.init()
@@ -87,14 +113,27 @@ final class VoiceCallService: NSObject {
     }
 
     func startOutgoingVoiceCall(chat: Chat, currentUser: User, presenter: UIViewController) {
+        startOutgoingCall(type: .voice, chat: chat, currentUser: currentUser, presenter: presenter)
+    }
+
+    func startOutgoingVideoCall(chat: Chat, currentUser: User, presenter: UIViewController) {
+        startOutgoingCall(type: .video, chat: chat, currentUser: currentUser, presenter: presenter)
+    }
+
+    private func startOutgoingCall(
+        type: VoiceCallType,
+        chat: Chat,
+        currentUser: User,
+        presenter: UIViewController
+    ) {
         guard Thread.isMainThread else {
             DispatchQueue.main.async { [weak presenter] in
                 guard let presenter else { return }
-                self.startOutgoingVoiceCall(chat: chat, currentUser: currentUser, presenter: presenter)
+                self.startOutgoingCall(type: type, chat: chat, currentUser: currentUser, presenter: presenter)
             }
             return
         }
-        debug("call button tapped")
+        debug("\(type.rawValue) call button tapped")
         guard chat.type == .direct else {
             presenter.presentVoiceCallAlert(message: VoiceCallServiceError.groupCallsUnsupported.localizedDescription)
             return
@@ -114,7 +153,7 @@ final class VoiceCallService: NSObject {
             presenter.presentVoiceCallAlert(message: VoiceCallServiceError.socketUnavailable.localizedDescription)
             return
         }
-        debug("socket connected for call start")
+        debug("socket connected for \(type.rawValue) call start")
 
         let startupID = UUID()
         self.startupID = startupID
@@ -135,7 +174,19 @@ final class VoiceCallService: NSObject {
                 presenter.presentVoiceCallAlert(message: VoiceCallServiceError.microphonePermissionDenied.localizedDescription)
                 return
             }
-            self.beginOutgoingVoiceCall(
+            if type == .video {
+                let hasCameraPermission = await self.requestCameraPermission()
+                guard self.startupID == startupID else { return }
+                self.debug("camera permission state granted=\(hasCameraPermission)")
+                guard hasCameraPermission else {
+                    self.isStartingCall = false
+                    self.startupID = nil
+                    presenter.presentVoiceCallAlert(message: VoiceCallServiceError.cameraPermissionDenied.localizedDescription)
+                    return
+                }
+            }
+            self.beginOutgoingCall(
+                type: type,
                 chat: chat,
                 currentUser: currentUser,
                 participant: participant,
@@ -145,7 +196,8 @@ final class VoiceCallService: NSObject {
         }
     }
 
-    private func beginOutgoingVoiceCall(
+    private func beginOutgoingCall(
+        type: VoiceCallType,
         chat: Chat,
         currentUser: User,
         participant: VoiceCallParticipant,
@@ -167,10 +219,13 @@ final class VoiceCallService: NSObject {
         self.currentUser = currentUser
         self.currentParticipant = participant
         self.direction = .outgoing
+        self.activeCallType = type
         self.callStartedAt = Date()
         self.callConnectedAt = nil
         self.isMuted = false
         self.isSpeakerOn = false
+        self.isCameraEnabled = true
+        self.isUsingFrontCamera = true
         presentCallUI(from: presenter) { [weak self, weak presenter] presented in
             guard let self else { return }
             guard self.startupID == startupID,
@@ -186,6 +241,7 @@ final class VoiceCallService: NSObject {
                 return
             }
             self.startOutgoingEngine(
+                type: type,
                 chat: chat,
                 participant: participant,
                 presenter: presenter,
@@ -202,6 +258,7 @@ final class VoiceCallService: NSObject {
     }
 
     private func startOutgoingEngine(
+        type: VoiceCallType,
         chat: Chat,
         participant: VoiceCallParticipant,
         presenter: UIViewController,
@@ -211,14 +268,16 @@ final class VoiceCallService: NSObject {
             guard let self else { return }
             do {
                 guard self.startupID == startupID else { return }
-                try await self.preparePeerConnection()
+                try await self.preparePeerConnection(for: type)
                 guard self.startupID == startupID else { return }
                 try self.audioSession.start()
-                let offer = try await self.createOffer()
+                self.applyInitialAudioRoute(for: type)
+                let offer = try await self.createOffer(for: type)
                 guard self.startupID == startupID else { return }
                 let call = try await SocketService.shared.sendCallOffer(
                     chatId: chat.id,
                     calleeId: participant.id,
+                    type: type,
                     offer: offer
                 )
                 guard self.startupID == startupID else {
@@ -226,6 +285,7 @@ final class VoiceCallService: NSObject {
                     return
                 }
                 self.currentCall = call
+                self.activeCallType = call.type
                 self.isStartingCall = false
                 self.startupID = nil
                 self.publish(status: .ringing)
@@ -241,10 +301,6 @@ final class VoiceCallService: NSObject {
 
     func acceptIncomingCall() {
         guard let call = currentCall, let offer = pendingOffer else { return }
-        guard call.type == .voice else {
-            rejectIncomingCall(reason: "unsupported_video")
-            return
-        }
         guard !isStartingCall, peerConnection == nil else { return }
         guard SocketService.shared.isConnected else {
             publishFailure(VoiceCallServiceError.socketUnavailable.localizedDescription)
@@ -264,11 +320,20 @@ final class VoiceCallService: NSObject {
                 guard hasMicrophonePermission else {
                     throw VoiceCallServiceError.microphonePermissionDenied
                 }
-                try await self.preparePeerConnection()
+                if call.type == .video {
+                    let hasCameraPermission = await self.requestCameraPermission()
+                    guard self.startupID == startupID else { return }
+                    self.debug("incoming camera permission granted=\(hasCameraPermission)", callId: call.callId)
+                    guard hasCameraPermission else {
+                        throw VoiceCallServiceError.cameraPermissionDenied
+                    }
+                }
+                try await self.preparePeerConnection(for: call.type)
                 guard self.startupID == startupID else { return }
                 try self.audioSession.start()
+                self.applyInitialAudioRoute(for: call.type)
                 try await self.applyRemoteDescription(signal: offer)
-                let answer = try await self.createAnswer()
+                let answer = try await self.createAnswer(for: call.type)
                 guard self.startupID == startupID else { return }
                 let answered = try await SocketService.shared.sendCallAnswer(callId: call.callId, answer: answer)
                 guard self.startupID == startupID else {
@@ -276,6 +341,7 @@ final class VoiceCallService: NSObject {
                     return
                 }
                 self.currentCall = answered
+                self.activeCallType = answered.type
                 self.isStartingCall = false
                 self.startupID = nil
                 self.callConnectedAt = Date()
@@ -286,7 +352,8 @@ final class VoiceCallService: NSObject {
             } catch {
                 guard self.startupID == startupID else { return }
                 self.debug("accept failed", callId: call.callId)
-                Task { try? await SocketService.shared.sendCallEnd(callId: call.callId, reason: "accept_failed") }
+                let reason = (error as? VoiceCallServiceError) == .cameraPermissionDenied ? "permission_denied" : "accept_failed"
+                Task { try? await SocketService.shared.sendCallEnd(callId: call.callId, reason: reason) }
                 self.handleStartupFailure(error, presenter: nil)
             }
         }
@@ -340,6 +407,103 @@ final class VoiceCallService: NSObject {
         }
     }
 
+    func toggleCamera() {
+        guard activeCallType == .video else { return }
+        isCameraEnabled.toggle()
+        localVideoTrack?.isEnabled = isCameraEnabled
+        publishCurrentState()
+    }
+
+    func switchCamera() {
+        guard activeCallType == .video,
+              !isSwitchingCamera,
+              let capturer = cameraCapturer else { return }
+        isSwitchingCamera = true
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer {
+                self.isSwitchingCamera = false
+                self.publishCurrentState()
+            }
+            do {
+                let capture = try Self.captureConfiguration(preferFrontCamera: !self.isUsingFrontCamera)
+                try await self.startCapture(capturer: capturer, configuration: capture)
+                self.isUsingFrontCamera = capture.device.position == .front
+                self.isCameraCapturing = true
+                self.debug("camera switched front=\(self.isUsingFrontCamera)", callId: self.currentCall?.callId)
+            } catch {
+                self.debug("camera switch failed", callId: self.currentCall?.callId)
+            }
+        }
+    }
+
+    func attachVideoRenderers(local: RTCVideoRenderer, remote: RTCVideoRenderer) {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { [weak self] in
+                self?.attachVideoRenderers(local: local, remote: remote)
+            }
+            return
+        }
+        if let localVideoRenderer {
+            localVideoTrack?.remove(localVideoRenderer)
+        }
+        if let remoteVideoRenderer {
+            remoteVideoTrack?.remove(remoteVideoRenderer)
+        }
+        localVideoRenderer = local
+        remoteVideoRenderer = remote
+        localVideoTrack?.add(local)
+        remoteVideoTrack?.add(remote)
+        publishCurrentState()
+    }
+
+    func detachVideoRenderers(local: RTCVideoRenderer, remote: RTCVideoRenderer) {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { [weak self] in
+                self?.detachVideoRenderers(local: local, remote: remote)
+            }
+            return
+        }
+        if let localVideoRenderer {
+            localVideoTrack?.remove(localVideoRenderer)
+            self.localVideoRenderer = nil
+        }
+        if let remoteVideoRenderer {
+            remoteVideoTrack?.remove(remoteVideoRenderer)
+            self.remoteVideoRenderer = nil
+        }
+        publishCurrentState()
+    }
+
+    private func requestCameraPermission() async -> Bool {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
+            switch AVCaptureDevice.authorizationStatus(for: .video) {
+            case .authorized:
+                continuation.resume(returning: true)
+            case .denied, .restricted:
+                continuation.resume(returning: false)
+            case .notDetermined:
+                AVCaptureDevice.requestAccess(for: .video) { granted in
+                    continuation.resume(returning: granted)
+                }
+            @unknown default:
+                continuation.resume(returning: false)
+            }
+        }
+    }
+
+    private func applyInitialAudioRoute(for type: VoiceCallType) {
+        guard type == .video else { return }
+        guard audioSession.currentRoute().kind == .receiver,
+              let speaker = audioSession.availableRoutes().first(where: { $0.kind == .speaker }) else { return }
+        do {
+            try audioSession.selectRoute(speaker)
+            isSpeakerOn = true
+        } catch {
+            debug("video speaker default failed", callId: currentCall?.callId)
+        }
+    }
+
     private func observeSocketCalls() {
         let center = NotificationCenter.default
         observers.append(center.addObserver(forName: .socketCallOffer, object: nil, queue: .main) { [weak self] notification in
@@ -369,8 +533,12 @@ final class VoiceCallService: NSObject {
             self?.handleBusy(event)
         })
         observers.append(center.addObserver(forName: .socketDisconnected, object: nil, queue: .main) { [weak self] _ in
-            guard let self, self.currentCall != nil else { return }
+            guard let self, self.currentCall != nil || self.isStartingCall || self.peerConnection != nil else { return }
             self.finishLocally(reason: "Connection lost")
+        })
+        observers.append(center.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in
+            guard let self, self.activeCallType == .video, self.currentCall != nil || self.isStartingCall else { return }
+            self.endActiveCall(reason: "backgrounded")
         })
     }
 
@@ -379,11 +547,6 @@ final class VoiceCallService: NSObject {
         guard let offer = event.offer else {
             debug("incoming offer missing signal", callId: call.callId)
             Task { try? await SocketService.shared.sendCallReject(callId: call.callId, reason: "invalid_signal") }
-            return
-        }
-        guard call.type == .voice else {
-            Task { try? await SocketService.shared.sendCallReject(callId: call.callId, reason: "unsupported_video") }
-            UIApplication.shared.topMostViewController()?.presentVoiceCallAlert(message: VoiceCallServiceError.unsupportedVideo.localizedDescription)
             return
         }
         guard currentCall == nil, peerConnection == nil, !isStartingCall else {
@@ -400,10 +563,13 @@ final class VoiceCallService: NSObject {
         queuedRemoteIceCandidates.removeAll()
         queuedLocalIceCandidates.removeAll()
         direction = .incoming
+        activeCallType = call.type
         callStartedAt = Date()
         callConnectedAt = nil
         isMuted = false
         isSpeakerOn = false
+        isCameraEnabled = true
+        isUsingFrontCamera = true
 
         Task { [weak self] in
             let chat = try? await self?.chatService.getChat(id: call.chatId)
@@ -446,6 +612,7 @@ final class VoiceCallService: NSObject {
             do {
                 try await self.applyRemoteDescription(signal: answer)
                 self.currentCall = event.call
+                self.activeCallType = event.call.type
                 self.callConnectedAt = Date()
                 self.publish(status: .active)
                 self.flushRemoteIceCandidates()
@@ -468,6 +635,7 @@ final class VoiceCallService: NSObject {
     private func handleRinging(_ event: SocketCallEvent) {
         guard isCurrentCall(event.call), direction == .outgoing else { return }
         currentCall = event.call
+        activeCallType = event.call.type
         publish(status: .ringing)
     }
 
@@ -484,7 +652,7 @@ final class VoiceCallService: NSObject {
         cleanup(shouldDismissUI: false)
     }
 
-    private func preparePeerConnection() async throws {
+    private func preparePeerConnection(for type: VoiceCallType) async throws {
         if peerConnection != nil { return }
         debug("preparing peer connection", callId: currentCall?.callId)
 
@@ -494,6 +662,15 @@ final class VoiceCallService: NSObject {
         audioTrack.isEnabled = !isMuted
         localAudioTrack = audioTrack
         peerConnection = peer
+        if type == .video {
+            let videoTrack = try await makeLocalVideoTrack(factory: factory, peerConnection: peer)
+            videoTrack.isEnabled = isCameraEnabled
+            localVideoTrack = videoTrack
+            if let localVideoRenderer {
+                videoTrack.add(localVideoRenderer)
+            }
+            debug("local video track added", callId: currentCall?.callId)
+        }
         debug("local audio track added", callId: currentCall?.callId)
     }
 
@@ -544,10 +721,50 @@ final class VoiceCallService: NSObject {
         return audioTrack
     }
 
-    private func createOffer() async throws -> [String: Any] {
+    private func makeLocalVideoTrack(
+        factory: RTCPeerConnectionFactory,
+        peerConnection: RTCPeerConnection
+    ) async throws -> RTCVideoTrack {
+        let videoSource = factory.videoSource()
+        let capturer = RTCCameraVideoCapturer(delegate: videoSource)
+        let videoTrack = factory.videoTrack(with: videoSource, trackId: "video-\(UUID().uuidString)")
+        guard peerConnection.add(videoTrack, streamIds: ["chitchat-video"]) != nil else {
+            throw VoiceCallServiceError.peerConnectionUnavailable
+        }
+
+        let capture = try Self.captureConfiguration(preferFrontCamera: isUsingFrontCamera)
+        localVideoSource = videoSource
+        cameraCapturer = capturer
+        try await startCapture(capturer: capturer, configuration: capture)
+        isUsingFrontCamera = capture.device.position == .front
+        isCameraCapturing = true
+        isCameraEnabled = true
+        return videoTrack
+    }
+
+    private func startCapture(
+        capturer: RTCCameraVideoCapturer,
+        configuration: CameraCaptureConfiguration
+    ) async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            capturer.startCapture(
+                with: configuration.device,
+                format: configuration.format,
+                fps: configuration.fps
+            ) { error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else {
+                    continuation.resume(returning: ())
+                }
+            }
+        }
+    }
+
+    private func createOffer(for type: VoiceCallType) async throws -> [String: Any] {
         guard let peerConnection else { throw VoiceCallServiceError.invalidSignal }
         let constraints = RTCMediaConstraints(
-            mandatoryConstraints: [kRTCMediaConstraintsOfferToReceiveAudio: kRTCMediaConstraintsValueTrue],
+            mandatoryConstraints: mediaConstraints(for: type),
             optionalConstraints: nil
         )
         let offer = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<RTCSessionDescription, Error>) in
@@ -565,10 +782,10 @@ final class VoiceCallService: NSObject {
         return Self.signal(from: offer)
     }
 
-    private func createAnswer() async throws -> [String: Any] {
+    private func createAnswer(for type: VoiceCallType) async throws -> [String: Any] {
         guard let peerConnection else { throw VoiceCallServiceError.invalidSignal }
         let constraints = RTCMediaConstraints(
-            mandatoryConstraints: [kRTCMediaConstraintsOfferToReceiveAudio: kRTCMediaConstraintsValueTrue],
+            mandatoryConstraints: mediaConstraints(for: type),
             optionalConstraints: nil
         )
         let answer = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<RTCSessionDescription, Error>) in
@@ -584,6 +801,14 @@ final class VoiceCallService: NSObject {
         }
         try await setLocalDescription(answer, on: peerConnection)
         return Self.signal(from: answer)
+    }
+
+    private func mediaConstraints(for type: VoiceCallType) -> [String: String] {
+        var constraints = [kRTCMediaConstraintsOfferToReceiveAudio: kRTCMediaConstraintsValueTrue]
+        if type == .video {
+            constraints[kRTCMediaConstraintsOfferToReceiveVideo] = kRTCMediaConstraintsValueTrue
+        }
+        return constraints
     }
 
     private func setLocalDescription(
@@ -678,6 +903,23 @@ final class VoiceCallService: NSObject {
         publishCurrentState()
     }
 
+    private func setRemoteVideoTrack(_ track: RTCVideoTrack?) {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { [weak self] in
+                self?.setRemoteVideoTrack(track)
+            }
+            return
+        }
+        if let remoteVideoRenderer {
+            remoteVideoTrack?.remove(remoteVideoRenderer)
+        }
+        remoteVideoTrack = track
+        if let track, let remoteVideoRenderer {
+            track.add(remoteVideoRenderer)
+        }
+        publishCurrentState()
+    }
+
     private func publish(
         status: VoiceCallPresentationStatus,
         callId: String? = nil,
@@ -690,6 +932,7 @@ final class VoiceCallService: NSObject {
         let route = audioSession.currentRoute()
         isSpeakerOn = route.kind == .speaker
         let state = VoiceCallPresentationState(
+            callType: activeCallType,
             direction: direction,
             status: status,
             callId: callId ?? call?.callId,
@@ -701,10 +944,15 @@ final class VoiceCallService: NSObject {
             connectedAt: callConnectedAt,
             isMuted: isMuted,
             isSpeakerOn: route.kind == .speaker,
+            isCameraEnabled: isCameraEnabled,
+            isUsingFrontCamera: isUsingFrontCamera,
+            hasLocalVideo: localVideoTrack != nil && isCameraEnabled,
+            hasRemoteVideo: remoteVideoTrack != nil,
             audioRouteName: route.title,
             audioRouteIconName: route.kind.iconName
         )
         callViewController?.render(state)
+        videoCallViewController?.render(state)
     }
 
     private func publishFailure(_ message: String) {
@@ -727,9 +975,16 @@ final class VoiceCallService: NSObject {
             return
         }
 
-        if let controller = callViewController {
-            completion(controller.presentingViewController != nil || controller.viewIfLoaded?.window != nil)
-            return
+        if activeCallType == .video {
+            if let controller = videoCallViewController {
+                completion(controller.presentingViewController != nil || controller.viewIfLoaded?.window != nil)
+                return
+            }
+        } else {
+            if let controller = callViewController {
+                completion(controller.presentingViewController != nil || controller.viewIfLoaded?.window != nil)
+                return
+            }
         }
 
         guard presenter.viewIfLoaded?.window != nil else {
@@ -742,23 +997,53 @@ final class VoiceCallService: NSObject {
             return
         }
 
-        let controller = VoiceCallViewController(service: self)
-        controller.modalPresentationStyle = .fullScreen
-        controller.onDismissed = { [weak self] in
-            self?.callViewController = nil
+        let controller: UIViewController
+        if activeCallType == .video {
+            let videoController = VideoCallViewController(service: self)
+            videoController.onDismissed = { [weak self] in
+                self?.videoCallViewController = nil
+            }
+            videoCallViewController = videoController
+            controller = videoController
+        } else {
+            let voiceController = VoiceCallViewController(service: self)
+            voiceController.onDismissed = { [weak self] in
+                self?.callViewController = nil
+            }
+            callViewController = voiceController
+            controller = voiceController
         }
+        controller.modalPresentationStyle = .fullScreen
         controller.loadViewIfNeeded()
-        callViewController = controller
         top.present(controller, animated: true) { [weak self, weak controller] in
-            guard let self, let controller, self.callViewController === controller else {
+            guard let self, let controller, self.isPresentedControllerCurrent(controller) else {
                 completion(false)
                 return
             }
             let presented = controller.presentingViewController != nil || controller.viewIfLoaded?.window != nil
             if !presented {
-                self.callViewController = nil
+                self.clearPresentedController(controller)
             }
             completion(presented)
+        }
+    }
+
+    private func isPresentedControllerCurrent(_ controller: UIViewController) -> Bool {
+        if let voice = controller as? VoiceCallViewController {
+            return callViewController === voice
+        }
+        if let video = controller as? VideoCallViewController {
+            return videoCallViewController === video
+        }
+        return false
+    }
+
+    private func clearPresentedController(_ controller: UIViewController) {
+        if let voice = controller as? VoiceCallViewController, callViewController === voice {
+            callViewController = nil
+        }
+        if let video = controller as? VideoCallViewController, videoCallViewController === video {
+            videoCallViewController = nil
         }
     }
 
@@ -772,6 +1057,7 @@ final class VoiceCallService: NSObject {
         debug("startup failed error=\(String(describing: type(of: error)))")
 
         let alertPresenter = callViewController
+            ?? videoCallViewController
             ?? UIApplication.shared.topMostViewController()
             ?? presenter
         if let alertPresenter, alertPresenter.presentedViewController == nil {
@@ -797,9 +1083,23 @@ final class VoiceCallService: NSObject {
         heartbeatTimer?.invalidate()
         heartbeatTimer = nil
         localAudioTrack?.isEnabled = false
+        localVideoTrack?.isEnabled = false
+        if let localVideoRenderer {
+            localVideoTrack?.remove(localVideoRenderer)
+        }
+        if let remoteVideoRenderer {
+            remoteVideoTrack?.remove(remoteVideoRenderer)
+        }
+        cameraCapturer?.stopCapture()
         peerConnection?.close()
         peerConnection = nil
         localAudioTrack = nil
+        localVideoTrack = nil
+        localVideoSource = nil
+        remoteVideoTrack = nil
+        cameraCapturer = nil
+        localVideoRenderer = nil
+        remoteVideoRenderer = nil
         currentCall = nil
         pendingOffer = nil
         queuedLocalIceCandidates.removeAll()
@@ -808,12 +1108,21 @@ final class VoiceCallService: NSObject {
         callConnectedAt = nil
         isMuted = false
         isSpeakerOn = false
+        isCameraEnabled = true
+        isUsingFrontCamera = true
+        isCameraCapturing = false
+        isSwitchingCamera = false
+        activeCallType = .voice
         isStartingCall = false
         startupID = nil
         audioSession.stop()
         if shouldDismissUI, let controller = callViewController {
             controller.dismiss(animated: true)
             callViewController = nil
+        }
+        if shouldDismissUI, let controller = videoCallViewController {
+            controller.dismiss(animated: true)
+            videoCallViewController = nil
         }
     }
 
@@ -879,6 +1188,41 @@ final class VoiceCallService: NSObject {
         return RTCIceCandidate(sdp: candidate, sdpMLineIndex: mLineIndex, sdpMid: mid)
     }
 
+    private static func captureConfiguration(preferFrontCamera: Bool) throws -> CameraCaptureConfiguration {
+        let devices = RTCCameraVideoCapturer.captureDevices()
+        guard !devices.isEmpty else { throw VoiceCallServiceError.cameraUnavailable }
+
+        let preferredPosition: AVCaptureDevice.Position = preferFrontCamera ? .front : .back
+        let fallbackPosition: AVCaptureDevice.Position = preferFrontCamera ? .back : .front
+        let device = devices.first(where: { $0.position == preferredPosition })
+            ?? devices.first(where: { $0.position == fallbackPosition })
+            ?? devices[0]
+
+        let formats = RTCCameraVideoCapturer.supportedFormats(for: device)
+        guard let format = formats.max(by: { lhs, rhs in
+            score(format: lhs) < score(format: rhs)
+        }) else {
+            throw VoiceCallServiceError.cameraUnavailable
+        }
+
+        let maxFPS = format.videoSupportedFrameRateRanges
+            .map { Int($0.maxFrameRate.rounded(.down)) }
+            .filter { $0 > 0 }
+            .max() ?? 15
+        return CameraCaptureConfiguration(device: device, format: format, fps: min(maxFPS, 30))
+    }
+
+    private static func score(format: AVCaptureDevice.Format) -> Int {
+        let dimensions = CMVideoFormatDescriptionGetDimensions(format.formatDescription)
+        let width = Int(dimensions.width)
+        let height = Int(dimensions.height)
+        let maxDimensionPenalty = max(width - 1280, 0) + max(height - 720, 0)
+        let fpsScore = format.videoSupportedFrameRateRanges
+            .map { Int($0.maxFrameRate.rounded(.down)) }
+            .max() ?? 0
+        return (width * height) - (maxDimensionPenalty * 4) + fpsScore
+    }
+
     private func debug(_ message: String, callId: String? = nil) {
         #if DEBUG
         if let callId {
@@ -892,8 +1236,34 @@ final class VoiceCallService: NSObject {
 
 extension VoiceCallService: RTCPeerConnectionDelegate {
     func peerConnection(_ peerConnection: RTCPeerConnection, didChange stateChanged: RTCSignalingState) {}
-    func peerConnection(_ peerConnection: RTCPeerConnection, didAdd stream: RTCMediaStream) {}
-    func peerConnection(_ peerConnection: RTCPeerConnection, didRemove stream: RTCMediaStream) {}
+    func peerConnection(_ peerConnection: RTCPeerConnection, didAdd stream: RTCMediaStream) {
+        if let track = stream.videoTracks.first {
+            setRemoteVideoTrack(track)
+        }
+    }
+
+    func peerConnection(_ peerConnection: RTCPeerConnection, didRemove stream: RTCMediaStream) {
+        if let remoteVideoTrack, stream.videoTracks.contains(where: { $0.isEqual(remoteVideoTrack) }) {
+            setRemoteVideoTrack(nil)
+        }
+    }
+
+    func peerConnection(
+        _ peerConnection: RTCPeerConnection,
+        didAdd rtpReceiver: RTCRtpReceiver,
+        streams mediaStreams: [RTCMediaStream]
+    ) {
+        if let track = rtpReceiver.track as? RTCVideoTrack {
+            setRemoteVideoTrack(track)
+        }
+    }
+
+    func peerConnection(_ peerConnection: RTCPeerConnection, didRemove rtpReceiver: RTCRtpReceiver) {
+        if let remoteVideoTrack, let track = rtpReceiver.track as? RTCVideoTrack, track.isEqual(remoteVideoTrack) {
+            setRemoteVideoTrack(nil)
+        }
+    }
+
     func peerConnectionShouldNegotiate(_ peerConnection: RTCPeerConnection) {}
     func peerConnection(_ peerConnection: RTCPeerConnection, didChange newState: RTCIceGatheringState) {}
     func peerConnection(_ peerConnection: RTCPeerConnection, didRemove candidates: [RTCIceCandidate]) {}

@@ -259,13 +259,18 @@ final class SocketService {
         return try Self.message(fromAcknowledgement: response)
     }
 
-    func sendCallOffer(chatId: String, calleeId: String, offer: [String: Any]) async throws -> VoiceCall {
+    func sendCallOffer(
+        chatId: String,
+        calleeId: String,
+        type: VoiceCallType,
+        offer: [String: Any]
+    ) async throws -> VoiceCall {
         let response = try await emitAcknowledgedResponse(
             "call:offer",
             payload: [
                 "chatId": chatId,
                 "calleeId": calleeId,
-                "type": VoiceCallType.voice.rawValue,
+                "type": type.rawValue,
                 "offer": offer
             ],
             timeout: 10
