@@ -37,9 +37,37 @@ enum APIClientError: LocalizedError {
     }
 }
 
+enum ChitChatConfiguration {
+    private static let apiBaseURLKey = "ChitChatAPIBaseURL"
+
+    static var apiBaseURL: URL? {
+#if DEBUG
+        if let override = ProcessInfo.processInfo.environment["CHITCHAT_API_BASE_URL"],
+           let url = validatedURL(override, allowHTTP: true) {
+            return url
+        }
+#endif
+
+        guard let configured = Bundle.main.object(forInfoDictionaryKey: apiBaseURLKey) as? String else {
+            return nil
+        }
+        return validatedURL(configured, allowHTTP: false)
+    }
+
+    private static func validatedURL(_ value: String, allowHTTP: Bool) -> URL? {
+        guard let url = URL(string: value.trimmingCharacters(in: .whitespacesAndNewlines)),
+              url.host != nil,
+              url.path.isEmpty || url.path == "/" else {
+            return nil
+        }
+        guard url.scheme == "https" || (allowHTTP && url.scheme == "http") else { return nil }
+        return url
+    }
+}
+
 final class APIClient {
     private static let configuredBaseURL: URL = {
-        if let url = URL(string: "http://156.67.105.161:8020") {
+        if let url = ChitChatConfiguration.apiBaseURL {
             return url
         }
         return URL(fileURLWithPath: "/")

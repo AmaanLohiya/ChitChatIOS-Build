@@ -166,9 +166,23 @@ jobs:
           APP_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$INFO_PLIST")"
           BUILD_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$INFO_PLIST")"
           MICROPHONE_TEXT="$(/usr/libexec/PlistBuddy -c 'Print :NSMicrophoneUsageDescription' "$INFO_PLIST" 2>/dev/null || true)"
+          API_BASE_URL="$(/usr/libexec/PlistBuddy -c 'Print :ChitChatAPIBaseURL' "$INFO_PLIST" 2>/dev/null || true)"
 
           if [[ -z "${MICROPHONE_TEXT//[[:space:]]/}" ]]; then
             echo "::error::NSMicrophoneUsageDescription is missing or empty in the processed app Info.plist."
+            exit 1
+          fi
+
+          if [[ "$API_BASE_URL" != "https://chitchatamaan.duckdns.org" ]]; then
+            echo "::error::Processed Info.plist does not contain the production HTTPS API URL."
+            exit 1
+          fi
+          if plutil -p "$INFO_PLIST" | grep -E -q "NSAllowsArbitraryLoads|NSExceptionAllowsInsecureHTTPLoads|156\\.67\\.105\\.161"; then
+            echo "::error::Processed Info.plist contains an insecure ATS/IP exception."
+            exit 1
+          fi
+          if grep -R -E -q "156\\.67\\.105\\.161(:8020)?|http://chitchatamaan\\.duckdns\\.org" "$APP_PATH"; then
+            echo "::error::Native app bundle contains an insecure legacy production endpoint."
             exit 1
           fi
 
@@ -227,6 +241,7 @@ jobs:
             echo "app_version=$APP_VERSION"
             echo "build_version=$BUILD_VERSION"
             echo "deployment_target=$DEPLOYMENT_TARGET"
+            echo "api_base_url=$API_BASE_URL"
             echo "selected_webrtc_framework=$WEBRTC_DEVICE_FRAMEWORK"
             echo "app_executable_uuid=$(echo "$APP_UUIDS" | tr '\n' ' ')"
             echo "dsym_uuid=$(echo "$DSYM_UUIDS" | tr '\n' ' ')"
@@ -249,7 +264,7 @@ jobs:
           fi
 
           echo "Created $IPA_NAME"
-          echo "Verified native Release IPA: WebRTC embedded, microphone usage present, app/dSYM UUIDs match."
+          echo "Verified native Release IPA: HTTPS API configured, insecure endpoints absent, WebRTC embedded, microphone usage present, app/dSYM UUIDs match."
 
       - name: Upload unsigned IPA artifact
         if: success()

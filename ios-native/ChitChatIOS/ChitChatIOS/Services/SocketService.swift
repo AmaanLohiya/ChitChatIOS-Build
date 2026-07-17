@@ -68,7 +68,7 @@ enum SocketServiceError: LocalizedError {
 final class SocketService {
     static let shared = SocketService()
 
-    private let baseURL = URL(string: "http://156.67.105.161:8020")
+    private let baseURL = ChitChatConfiguration.apiBaseURL
     private let notificationCenter: NotificationCenter
     private var manager: SocketManager?
     private var socket: SocketIOClient?
