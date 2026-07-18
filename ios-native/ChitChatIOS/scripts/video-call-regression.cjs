@@ -6,15 +6,18 @@ const path = require('node:path');
 const repoRoot = path.resolve(__dirname, '..', '..', '..');
 const nativeRoot = path.resolve(__dirname, '..', 'ChitChatIOS');
 const baseline = '7e8906dd6eec9126a674dd209388a2ad87ec6ed7';
+const privateVideoBaseline = '54d7f365c3fe2f44527b1d8b45016c0933644998';
+const publicVideoBaseline = 'ce83bedb4365805f34ed2714211e1962df3698b2';
 const read = (relativePath) => fs.readFileSync(path.join(nativeRoot, relativePath), 'utf8');
 const readRepo = (relativePath) => fs.readFileSync(path.join(repoRoot, relativePath), 'utf8');
 const normalize = (value) => value.replace(/\r\n/g, '\n');
-const baselineFile = (relativePath) =>
-  cp.execFileSync('git', ['show', `${baseline}:${relativePath}`], {
+const fileAtRef = (ref, relativePath) =>
+  cp.execFileSync('git', ['show', `${ref}:${relativePath}`], {
     cwd: repoRoot,
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe']
   });
+const baselineFile = (relativePath) => fileAtRef(baseline, relativePath);
 const hasGitObject = (ref) => {
   try {
     cp.execFileSync('git', ['cat-file', '-e', ref], { cwd: repoRoot, stdio: 'ignore' });
@@ -22,6 +25,18 @@ const hasGitObject = (ref) => {
   } catch {
     return false;
   }
+};
+const videoBaseline = hasGitObject(`${privateVideoBaseline}^{commit}`)
+  ? privateVideoBaseline
+  : publicVideoBaseline;
+const nativeFileAtVideoBaseline = (relativePath) =>
+  fileAtRef(videoBaseline, `ios-native/ChitChatIOS/ChitChatIOS/${relativePath}`);
+const section = (source, start, end) => {
+  const startIndex = source.indexOf(start);
+  const endIndex = source.indexOf(end, startIndex);
+  assert.notEqual(startIndex, -1, `missing section start: ${start}`);
+  assert.notEqual(endIndex, -1, `missing section end: ${end}`);
+  return source.slice(startIndex, endIndex);
 };
 
 const service = read('Services/VoiceCallService.swift');
@@ -134,6 +149,64 @@ test('dedicated video UI has remote, local, and Android-equivalent controls', ()
   assert.match(videoVC, /toggleCamera/);
   assert.match(videoVC, /switchCamera/);
   assert.match(videoVC, /showAudioRoutes/);
+});
+
+test('connected controls use equal slots constrained to the safe area', () => {
+  assert.match(videoVC, /activeStack\.distribution = \.fillEqually/);
+  assert.match(videoVC, /activeStack\.leadingAnchor\.constraint\(equalTo: view\.safeAreaLayoutGuide\.leadingAnchor/);
+  assert.match(videoVC, /activeStack\.trailingAnchor\.constraint\(equalTo: view\.safeAreaLayoutGuide\.trailingAnchor/);
+  assert.match(videoVC, /activeStack\.bottomAnchor\.constraint\(equalTo: view\.safeAreaLayoutGuide\.bottomAnchor/);
+  assert.match(videoVC, /activeStack\.heightAnchor\.constraint\(equalToConstant: 64\)/);
+});
+
+test('all five connected-call controls remain present in order', () => {
+  const activeStackSection = section(
+    videoVC,
+    'activeStack.translatesAutoresizingMaskIntoConstraints = false',
+    'view.addSubview(activeStack)'
+  );
+  const expectedControls = [
+    'muteButton',
+    'cameraButton',
+    'switchCameraButton',
+    'audioRouteButton',
+    'endButton'
+  ];
+  assert.deepEqual(
+    [...activeStackSection.matchAll(/activeStack\.addArrangedSubview\((\w+)\)/g)].map((match) => match[1]),
+    expectedControls
+  );
+});
+
+test('connected-control labels are single-line and shrink safely', () => {
+  assert.match(videoVC, /button\.titleLabel\?\.numberOfLines = 1/);
+  assert.match(videoVC, /button\.titleLabel\?\.lineBreakMode = \.byTruncatingTail/);
+  assert.match(videoVC, /button\.titleLabel\?\.adjustsFontSizeToFitWidth = true/);
+  assert.match(videoVC, /button\.titleLabel\?\.minimumScaleFactor = 0\.75/);
+});
+
+test('audio route uses a bounded label and exposes the selected route accessibly', () => {
+  assert.match(videoVC, /configuration\?\.title = "Audio"/);
+  assert.doesNotMatch(videoVC, /configuration\?\.title = state\.audioRouteName/);
+  assert.match(videoVC, /audioRouteButton\.accessibilityLabel = "Audio route"/);
+  assert.match(videoVC, /audioRouteButton\.accessibilityValue = state\.audioRouteName/);
+});
+
+test('incoming accept-decline layout remains unchanged from the video baseline', () => {
+  const baselineVideoVC = nativeFileAtVideoBaseline('Screens/VideoCallViewController.swift');
+  const ranges = [
+    ['configureCircleButton(declineButton', 'configureControlButton(muteButton'],
+    ['incomingStack.translatesAutoresizingMaskIntoConstraints = false', 'activeStack.translatesAutoresizingMaskIntoConstraints = false'],
+    ['incomingStack.leadingAnchor.constraint', 'activeStack.leadingAnchor.constraint']
+  ];
+  for (const [start, end] of ranges) {
+    assert.equal(normalize(section(videoVC, start, end)), normalize(section(baselineVideoVC, start, end)));
+  }
+});
+
+test('WebRTC media and signaling services remain unchanged from the video baseline', () => {
+  assert.equal(normalize(service), normalize(nativeFileAtVideoBaseline('Services/VoiceCallService.swift')));
+  assert.equal(normalize(socket), normalize(nativeFileAtVideoBaseline('Services/SocketService.swift')));
 });
 
 test('video permissions describe current behavior', () => {

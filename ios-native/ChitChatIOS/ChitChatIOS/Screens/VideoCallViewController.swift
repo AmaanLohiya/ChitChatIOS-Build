@@ -223,8 +223,10 @@ final class VideoCallViewController: UIViewController {
         configureControlButton(muteButton, symbol: "mic.fill", title: "Mute")
         configureControlButton(cameraButton, symbol: "video.fill", title: "Camera")
         configureControlButton(switchCameraButton, symbol: "camera.rotate.fill", title: "Flip")
-        configureControlButton(audioRouteButton, symbol: "speaker.wave.2.fill", title: "Speaker")
-        configureCircleButton(endButton, symbol: "phone.down.fill", background: ChitChatColors.danger, size: 62)
+        configureControlButton(audioRouteButton, symbol: "speaker.wave.2.fill", title: "Audio")
+        configureControlButton(endButton, symbol: "phone.down.fill", title: "End")
+        endButton.backgroundColor = ChitChatColors.danger
+        endButton.layer.borderWidth = 0
 
         declineButton.addTarget(self, action: #selector(declineCall), for: .touchUpInside)
         acceptButton.addTarget(self, action: #selector(acceptCall), for: .touchUpInside)
@@ -245,7 +247,8 @@ final class VideoCallViewController: UIViewController {
         activeStack.translatesAutoresizingMaskIntoConstraints = false
         activeStack.axis = .horizontal
         activeStack.alignment = .center
-        activeStack.distribution = .equalSpacing
+        activeStack.distribution = .fillEqually
+        activeStack.spacing = 4
         activeStack.addArrangedSubview(muteButton)
         activeStack.addArrangedSubview(cameraButton)
         activeStack.addArrangedSubview(switchCameraButton)
@@ -266,9 +269,10 @@ final class VideoCallViewController: UIViewController {
             incomingStack.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -54),
             incomingStack.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -58),
 
-            activeStack.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 14),
-            activeStack.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -14),
-            activeStack.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -24),
+            activeStack.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 10),
+            activeStack.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -10),
+            activeStack.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -12),
+            activeStack.heightAnchor.constraint(equalToConstant: 64),
 
             wideButton.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 24),
             wideButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -24),
@@ -305,15 +309,21 @@ final class VideoCallViewController: UIViewController {
             withConfiguration: UIImage.SymbolConfiguration(pointSize: 20, weight: .semibold)
         )
         configuration.imagePlacement = .top
-        configuration.imagePadding = 4
+        configuration.imagePadding = 3
         configuration.title = title
         configuration.baseForegroundColor = ChitChatColors.textPrimary
-        configuration.contentInsets = NSDirectionalEdgeInsets(top: 8, leading: 4, bottom: 7, trailing: 4)
+        configuration.contentInsets = NSDirectionalEdgeInsets(top: 6, leading: 2, bottom: 6, trailing: 2)
+        configuration.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { attributes in
+            var attributes = attributes
+            attributes.font = UIFont.systemFont(ofSize: 11, weight: .semibold)
+            return attributes
+        }
         button.configuration = configuration
-        NSLayoutConstraint.activate([
-            button.widthAnchor.constraint(equalToConstant: 58),
-            button.heightAnchor.constraint(equalToConstant: 58)
-        ])
+        button.titleLabel?.numberOfLines = 1
+        button.titleLabel?.lineBreakMode = .byTruncatingTail
+        button.titleLabel?.adjustsFontSizeToFitWidth = true
+        button.titleLabel?.minimumScaleFactor = 0.75
+        button.heightAnchor.constraint(equalToConstant: 64).isActive = true
     }
 
     private func updateLabels(for state: VoiceCallPresentationState) {
@@ -382,24 +392,28 @@ final class VideoCallViewController: UIViewController {
 
     private func updateCameraButton(_ isEnabled: Bool) {
         var configuration = cameraButton.configuration
-        configuration?.title = isEnabled ? "Camera" : "Camera off"
+        configuration?.title = "Camera"
         configuration?.image = UIImage(
             systemName: isEnabled ? "video.fill" : "video.slash.fill",
             withConfiguration: UIImage.SymbolConfiguration(pointSize: 20, weight: .semibold)
         )
         configuration?.baseForegroundColor = isEnabled ? ChitChatColors.textPrimary : ChitChatColors.accent
         cameraButton.configuration = configuration
+        cameraButton.accessibilityLabel = "Camera"
+        cameraButton.accessibilityValue = isEnabled ? "On" : "Off"
     }
 
     private func updateAudioRouteButton(_ state: VoiceCallPresentationState) {
         var configuration = audioRouteButton.configuration
-        configuration?.title = state.audioRouteName
+        configuration?.title = "Audio"
         configuration?.image = UIImage(
             systemName: state.audioRouteIconName,
             withConfiguration: UIImage.SymbolConfiguration(pointSize: 20, weight: .semibold)
         )
         configuration?.baseForegroundColor = state.isSpeakerOn ? ChitChatColors.accent : ChitChatColors.textPrimary
         audioRouteButton.configuration = configuration
+        audioRouteButton.accessibilityLabel = "Audio route"
+        audioRouteButton.accessibilityValue = state.audioRouteName
     }
 
     private func updateDurationTimer(for state: VoiceCallPresentationState) {
