@@ -157,7 +157,14 @@ final class SessionManager {
 
         refreshTask = task
         defer { refreshTask = nil }
-        return try await task.value
+        do {
+            return try await task.value
+        } catch {
+            if shouldClearSession(after: error) {
+                signOut()
+            }
+            throw error
+        }
     }
 
     func signOut() {
@@ -246,6 +253,24 @@ final class SessionManager {
 
     private func transition(for user: User) {
         state = user.isProfileComplete ? .signedIn(user) : .profileSetup(user)
+    }
+
+    private func shouldClearSession(after error: Error) -> Bool {
+        guard let apiError = error as? APIClientError else { return false }
+        switch apiError {
+        case .unauthorized:
+            return true
+        case .server(let code, _):
+            return [
+                "SESSION_INVALID",
+                "SESSION_EXPIRED",
+                "INVALID_REFRESH_TOKEN",
+                "INVALID_TOKEN",
+                "MISSING_AUTH_SESSION"
+            ].contains(code)
+        default:
+            return false
+        }
     }
 }
 

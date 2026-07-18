@@ -88,8 +88,17 @@ final class SettingsViewController: BaseViewController {
         content.addArrangedSubview(makeSectionTitle("NOTIFICATIONS"))
         content.addArrangedSubview(makeSliderCard())
         content.addArrangedSubview(makeSectionTitle("ACCOUNT"))
+        let activeSessionsRow = makeRow(
+            symbol: "laptopcomputer.and.iphone",
+            title: "Active sessions",
+            value: "Review and log out signed-in devices"
+        )
+        activeSessionsRow.addGestureRecognizer(
+            UITapGestureRecognizer(target: self, action: #selector(openActiveSessions))
+        )
         content.addArrangedSubview(makeRowsCard([
             makeRow(symbol: "person", title: "Account", value: "Privacy, security, change number"),
+            activeSessionsRow,
             makeRow(symbol: "lock", title: "Privacy", value: "Block contacts, disappearing messages"),
             makeRow(symbol: "shield", title: "Security", value: "Two-step verification, passcode lock")
         ]))
@@ -438,6 +447,10 @@ final class SettingsViewController: BaseViewController {
 
     @objc private func openNotificationSettings() {
         navigationController?.pushViewController(NotificationSettingsViewController(), animated: true)
+    }
+
+    @objc private func openActiveSessions() {
+        navigationController?.pushViewController(ActiveSessionsViewController(), animated: true)
     }
 
     @objc private func confirmLogout() {

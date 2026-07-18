@@ -51,6 +51,7 @@ struct DeviceInfo: Codable {
     let deviceId: String?
     let deviceName: String?
     let platform: String?
+    let osVersion: String?
     let appVersion: String?
 }
 
@@ -90,6 +91,29 @@ struct LogoutRequest: Encodable {
 
 struct LogoutResponse: Decodable {
     let revokedSessionId: String
+}
+
+struct ActiveSession: Decodable {
+    let id: String
+    let isCurrent: Bool
+    let platform: String
+    let deviceName: String
+    let appVersion: String
+    let createdAt: String
+    let lastActiveAt: String
+}
+
+struct ActiveSessionsResponse: Decodable {
+    let sessions: [ActiveSession]
+}
+
+struct RevokeSessionResponse: Decodable {
+    let revokedSessionId: String
+    let alreadyRevoked: Bool
+}
+
+struct LogoutOthersResponse: Decodable {
+    let revokedCount: Int
 }
 
 struct AuthSession: Codable {

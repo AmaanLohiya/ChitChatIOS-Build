@@ -66,14 +66,44 @@ final class AuthService {
         )
     }
 
+    func listSessions() async throws -> [ActiveSession] {
+        let response: ActiveSessionsResponse = try await apiClient.request(
+            "/api/v1/auth/sessions",
+            method: .get,
+            requiresAuth: true
+        )
+        return response.sessions
+    }
+
+    func revokeSession(sessionId: String) async throws -> RevokeSessionResponse {
+        let encodedSessionID = sessionId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? sessionId
+        return try await apiClient.request(
+            "/api/v1/auth/sessions/\(encodedSessionID)",
+            method: .delete,
+            requiresAuth: true
+        )
+    }
+
+    func logoutOtherSessions() async throws -> LogoutOthersResponse {
+        try await apiClient.request(
+            "/api/v1/auth/logout-others",
+            method: .post,
+            body: EmptyResponse(),
+            requiresAuth: true
+        )
+    }
+
     private func makeDeviceInfo() -> DeviceInfo {
         let device = UIDevice.current
-        let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String
+        let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? ""
+        let buildVersion = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? ""
+        let versionLabel = buildVersion.isEmpty ? appVersion : "\(appVersion) (\(buildVersion))"
         return DeviceInfo(
-            deviceId: device.identifierForVendor?.uuidString,
+            deviceId: PushNotificationService.shared.installationID,
             deviceName: device.name,
             platform: "ios",
-            appVersion: appVersion
+            osVersion: device.systemVersion,
+            appVersion: versionLabel
         )
     }
 }
