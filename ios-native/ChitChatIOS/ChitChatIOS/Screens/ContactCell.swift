@@ -180,7 +180,10 @@ final class ContactCell: UITableViewCell {
                 .kern: -0.2
             ]
         )
-        statusLabel.text = contact.label.isEmpty ? contact.phoneNumber : contact.label
+        let detail = contact.label.isEmpty ? contact.phoneNumber : contact.label
+        statusLabel.text = contact.contactUserId == nil
+            ? "Saved contact - \(detail)"
+            : "On ChitChat - \(detail)"
         accessibilityLabel = "\(contact.name), \(statusLabel.text ?? "")"
     }
 }

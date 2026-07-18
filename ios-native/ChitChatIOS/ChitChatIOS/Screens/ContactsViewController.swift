@@ -10,6 +10,42 @@ private enum ContactsSortDirection: Equatable {
     case descending
 }
 
+private enum DeviceContactSyncUIState: Equatable {
+    case checking
+    case permissionRequired
+    case syncing
+    case denied
+    case restricted
+    case emptyAddressBook
+    case noMatches
+    case synced(Int)
+    case failed
+
+    var copy: (title: String, subtitle: String) {
+        switch self {
+        case .checking:
+            return ("Find ChitChat contacts", "Checking contact access...")
+        case .permissionRequired:
+            return ("Find ChitChat contacts", "Match your address book securely")
+        case .syncing:
+            return ("Matching contacts", "Checking who is on ChitChat...")
+        case .denied:
+            return ("Contacts access denied", "Open Settings to match contacts")
+        case .restricted:
+            return ("Contacts access restricted", "Contact access is restricted on this device")
+        case .emptyAddressBook:
+            return ("No phone contacts found", "Add phone numbers, then refresh")
+        case .noMatches:
+            return ("No registered contacts found", "Your saved contacts remain available")
+        case let .synced(count):
+            let noun = count == 1 ? "contact is" : "contacts are"
+            return ("Contacts matched", "\(count) address-book \(noun) on ChitChat")
+        case .failed:
+            return ("Contact sync failed", "Check your connection and tap to retry")
+        }
+    }
+}
+
 private final class ContactsMenuButton: UIButton {
     override var isHighlighted: Bool {
         didSet {
@@ -22,6 +58,7 @@ final class ContactsViewController: BaseViewController {
     private let currentUser: User
     private let contactService: ContactService
     private let chatService: ChatService
+    private let deviceContactsService: DeviceContactsService
 
     private let headerView = UIView()
     private let titleLabel = UILabel()
@@ -29,8 +66,8 @@ final class ContactsViewController: BaseViewController {
     private let searchField = UITextField()
     private let addButton = UIButton(type: .system)
     private let tableView = UITableView(frame: .zero, style: .plain)
-    private var inviteRow = UIView()
-    private var inviteGlow = UIView()
+    private var syncRow = UIView()
+    private var syncGlow = UIView()
 
     private var contacts: [Contact] = []
     private var sections: [ContactsSection] = []
@@ -41,15 +78,18 @@ final class ContactsViewController: BaseViewController {
     private var loadTask: Task<Void, Never>?
     private var openChatTask: Task<Void, Never>?
     private var hasLoaded = false
+    private var deviceSyncState: DeviceContactSyncUIState = .checking
 
     init(
         currentUser: User,
         contactService: ContactService = ContactService(),
-        chatService: ChatService = ChatService()
+        chatService: ChatService = ChatService(),
+        deviceContactsService: DeviceContactsService = DeviceContactsService()
     ) {
         self.currentUser = currentUser
         self.contactService = contactService
         self.chatService = chatService
+        self.deviceContactsService = deviceContactsService
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -64,7 +104,13 @@ final class ContactsViewController: BaseViewController {
         configureTable()
         updateListHeader()
         updateEmptyState()
-        startInviteGlow()
+        startSyncGlow()
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(applicationDidBecomeActive),
+            name: UIApplication.didBecomeActiveNotification,
+            object: nil
+        )
     }
 
     override func viewWillAppear(_ animated: Bool) {
@@ -82,7 +128,8 @@ final class ContactsViewController: BaseViewController {
     deinit {
         loadTask?.cancel()
         openChatTask?.cancel()
-        inviteGlow.layer.removeAllAnimations()
+        syncGlow.layer.removeAllAnimations()
+        NotificationCenter.default.removeObserver(self)
     }
 
     private func configureHeader() {
@@ -287,9 +334,9 @@ final class ContactsViewController: BaseViewController {
     }
 
     private func updateListHeader() {
-        inviteGlow.layer.removeAllAnimations()
-        inviteRow = UIView()
-        inviteGlow = UIView()
+        syncGlow.layer.removeAllAnimations()
+        syncRow = UIView()
+        syncGlow = UIView()
 
         let width = max(view.bounds.width, tableView.bounds.width)
         let errorHeight: CGFloat = errorMessage == nil ? 0 : 56
@@ -298,8 +345,8 @@ final class ContactsViewController: BaseViewController {
         container.backgroundColor = ChitChatColors.contactsScreen
         container.autoresizingMask = [.flexibleWidth]
 
-        inviteRow.translatesAutoresizingMaskIntoConstraints = false
-        inviteRow.backgroundColor = .clear
+        syncRow.translatesAutoresizingMaskIntoConstraints = false
+        syncRow.backgroundColor = .clear
 
         let inviteDivider = UIView()
         inviteDivider.translatesAutoresizingMaskIntoConstraints = false
@@ -309,10 +356,10 @@ final class ContactsViewController: BaseViewController {
         iconWrap.translatesAutoresizingMaskIntoConstraints = false
         iconWrap.backgroundColor = .clear
 
-        inviteGlow.translatesAutoresizingMaskIntoConstraints = false
-        inviteGlow.backgroundColor = ChitChatColors.contactsInviteGlow
-        inviteGlow.layer.cornerRadius = ChitChatSpacing.contactsInviteIcon / 2
-        inviteGlow.alpha = 0.2
+        syncGlow.translatesAutoresizingMaskIntoConstraints = false
+        syncGlow.backgroundColor = ChitChatColors.contactsInviteGlow
+        syncGlow.layer.cornerRadius = ChitChatSpacing.contactsInviteIcon / 2
+        syncGlow.alpha = 0.2
 
         let iconCircle = UIView()
         iconCircle.translatesAutoresizingMaskIntoConstraints = false
@@ -329,10 +376,11 @@ final class ContactsViewController: BaseViewController {
         inviteIcon.tintColor = .white
         inviteIcon.contentMode = .scaleAspectFit
 
-        let inviteTitle = UILabel()
-        inviteTitle.translatesAutoresizingMaskIntoConstraints = false
-        inviteTitle.attributedText = NSAttributedString(
-            string: "Invite friends",
+        let syncCopy = deviceSyncState.copy
+        let syncTitle = UILabel()
+        syncTitle.translatesAutoresizingMaskIntoConstraints = false
+        syncTitle.attributedText = NSAttributedString(
+            string: syncCopy.title,
             attributes: [
                 .font: ChitChatTypography.contactsInviteTitle,
                 .foregroundColor: ChitChatColors.textPrimary,
@@ -340,53 +388,54 @@ final class ContactsViewController: BaseViewController {
             ]
         )
 
-        let inviteSubtitle = UILabel()
-        inviteSubtitle.translatesAutoresizingMaskIntoConstraints = false
-        inviteSubtitle.text = "Share ChitChat with your contacts"
-        inviteSubtitle.font = ChitChatTypography.contactsInviteSubtitle
-        inviteSubtitle.textColor = ChitChatColors.textMuted
+        let syncSubtitle = UILabel()
+        syncSubtitle.translatesAutoresizingMaskIntoConstraints = false
+        syncSubtitle.text = syncCopy.subtitle
+        syncSubtitle.font = ChitChatTypography.contactsInviteSubtitle
+        syncSubtitle.textColor = ChitChatColors.textMuted
+        syncSubtitle.numberOfLines = 2
 
-        let textStack = UIStackView(arrangedSubviews: [inviteTitle, inviteSubtitle])
+        let textStack = UIStackView(arrangedSubviews: [syncTitle, syncSubtitle])
         textStack.translatesAutoresizingMaskIntoConstraints = false
         textStack.axis = .vertical
         textStack.alignment = .leading
         textStack.spacing = 2
 
-        let inviteButton = UIButton(type: .custom)
-        inviteButton.translatesAutoresizingMaskIntoConstraints = false
-        inviteButton.accessibilityLabel = "Invite friends"
-        inviteButton.addTarget(self, action: #selector(inviteFriends), for: .touchUpInside)
-        inviteButton.addTarget(self, action: #selector(invitePressed), for: .touchDown)
-        inviteButton.addTarget(
+        let syncButton = UIButton(type: .custom)
+        syncButton.translatesAutoresizingMaskIntoConstraints = false
+        syncButton.accessibilityLabel = "\(syncCopy.title). \(syncCopy.subtitle)"
+        syncButton.addTarget(self, action: #selector(deviceContactsTapped), for: .touchUpInside)
+        syncButton.addTarget(self, action: #selector(syncPressed), for: .touchDown)
+        syncButton.addTarget(
             self,
-            action: #selector(inviteReleased),
+            action: #selector(syncReleased),
             for: [.touchUpInside, .touchUpOutside, .touchCancel]
         )
 
-        container.addSubview(inviteRow)
-        inviteRow.addSubview(iconWrap)
-        iconWrap.addSubview(inviteGlow)
+        container.addSubview(syncRow)
+        syncRow.addSubview(iconWrap)
+        iconWrap.addSubview(syncGlow)
         iconWrap.addSubview(iconCircle)
         iconCircle.addSubview(inviteIcon)
-        inviteRow.addSubview(textStack)
-        inviteRow.addSubview(inviteDivider)
-        inviteRow.addSubview(inviteButton)
+        syncRow.addSubview(textStack)
+        syncRow.addSubview(inviteDivider)
+        syncRow.addSubview(syncButton)
 
         NSLayoutConstraint.activate([
-            inviteRow.topAnchor.constraint(equalTo: container.topAnchor, constant: 10),
-            inviteRow.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-            inviteRow.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-            inviteRow.heightAnchor.constraint(equalToConstant: 72),
+            syncRow.topAnchor.constraint(equalTo: container.topAnchor, constant: 10),
+            syncRow.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            syncRow.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            syncRow.heightAnchor.constraint(equalToConstant: 72),
 
-            iconWrap.leadingAnchor.constraint(equalTo: inviteRow.leadingAnchor, constant: 16),
-            iconWrap.centerYAnchor.constraint(equalTo: inviteRow.centerYAnchor),
+            iconWrap.leadingAnchor.constraint(equalTo: syncRow.leadingAnchor, constant: 16),
+            iconWrap.centerYAnchor.constraint(equalTo: syncRow.centerYAnchor),
             iconWrap.widthAnchor.constraint(equalToConstant: ChitChatSpacing.contactsInviteIcon),
             iconWrap.heightAnchor.constraint(equalToConstant: ChitChatSpacing.contactsInviteIcon),
 
-            inviteGlow.centerXAnchor.constraint(equalTo: iconWrap.centerXAnchor),
-            inviteGlow.centerYAnchor.constraint(equalTo: iconWrap.centerYAnchor),
-            inviteGlow.widthAnchor.constraint(equalToConstant: ChitChatSpacing.contactsInviteIcon),
-            inviteGlow.heightAnchor.constraint(equalToConstant: ChitChatSpacing.contactsInviteIcon),
+            syncGlow.centerXAnchor.constraint(equalTo: iconWrap.centerXAnchor),
+            syncGlow.centerYAnchor.constraint(equalTo: iconWrap.centerYAnchor),
+            syncGlow.widthAnchor.constraint(equalToConstant: ChitChatSpacing.contactsInviteIcon),
+            syncGlow.heightAnchor.constraint(equalToConstant: ChitChatSpacing.contactsInviteIcon),
 
             iconCircle.centerXAnchor.constraint(equalTo: iconWrap.centerXAnchor),
             iconCircle.centerYAnchor.constraint(equalTo: iconWrap.centerYAnchor),
@@ -399,20 +448,20 @@ final class ContactsViewController: BaseViewController {
             inviteIcon.heightAnchor.constraint(equalToConstant: 15),
 
             textStack.leadingAnchor.constraint(equalTo: iconWrap.trailingAnchor, constant: 12),
-            textStack.trailingAnchor.constraint(lessThanOrEqualTo: inviteRow.trailingAnchor, constant: -16),
-            textStack.centerYAnchor.constraint(equalTo: inviteRow.centerYAnchor),
-            inviteTitle.heightAnchor.constraint(equalToConstant: 20),
-            inviteSubtitle.heightAnchor.constraint(equalToConstant: 16),
+            textStack.trailingAnchor.constraint(lessThanOrEqualTo: syncRow.trailingAnchor, constant: -16),
+            textStack.centerYAnchor.constraint(equalTo: syncRow.centerYAnchor),
+            syncTitle.heightAnchor.constraint(equalToConstant: 20),
+            syncSubtitle.heightAnchor.constraint(greaterThanOrEqualToConstant: 16),
 
-            inviteDivider.leadingAnchor.constraint(equalTo: inviteRow.leadingAnchor),
-            inviteDivider.trailingAnchor.constraint(equalTo: inviteRow.trailingAnchor),
-            inviteDivider.bottomAnchor.constraint(equalTo: inviteRow.bottomAnchor),
+            inviteDivider.leadingAnchor.constraint(equalTo: syncRow.leadingAnchor),
+            inviteDivider.trailingAnchor.constraint(equalTo: syncRow.trailingAnchor),
+            inviteDivider.bottomAnchor.constraint(equalTo: syncRow.bottomAnchor),
             inviteDivider.heightAnchor.constraint(equalToConstant: 1),
 
-            inviteButton.topAnchor.constraint(equalTo: inviteRow.topAnchor),
-            inviteButton.leadingAnchor.constraint(equalTo: inviteRow.leadingAnchor),
-            inviteButton.trailingAnchor.constraint(equalTo: inviteRow.trailingAnchor),
-            inviteButton.bottomAnchor.constraint(equalTo: inviteRow.bottomAnchor)
+            syncButton.topAnchor.constraint(equalTo: syncRow.topAnchor),
+            syncButton.leadingAnchor.constraint(equalTo: syncRow.leadingAnchor),
+            syncButton.trailingAnchor.constraint(equalTo: syncRow.trailingAnchor),
+            syncButton.bottomAnchor.constraint(equalTo: syncRow.bottomAnchor)
         ])
 
         if let errorMessage {
@@ -433,7 +482,7 @@ final class ContactsViewController: BaseViewController {
             container.addSubview(banner)
             banner.addSubview(errorLabel)
             NSLayoutConstraint.activate([
-                banner.topAnchor.constraint(equalTo: inviteRow.bottomAnchor, constant: 10),
+                banner.topAnchor.constraint(equalTo: syncRow.bottomAnchor, constant: 10),
                 banner.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 16),
                 banner.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -16),
                 banner.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -8),
@@ -447,51 +496,125 @@ final class ContactsViewController: BaseViewController {
         tableView.tableHeaderView = container
     }
 
-    private func startInviteGlow() {
-        inviteGlow.layer.removeAllAnimations()
-        inviteGlow.alpha = 0.2
+    private func startSyncGlow() {
+        syncGlow.layer.removeAllAnimations()
+        syncGlow.alpha = 0.2
         UIView.animate(
             withDuration: 1.2,
             delay: 0,
             options: [.autoreverse, .repeat, .allowUserInteraction]
         ) {
-            self.inviteGlow.alpha = 0.46
+            self.syncGlow.alpha = 0.46
         }
     }
 
-    private func loadContacts(showLoadingState: Bool) {
+    private func loadContacts(
+        showLoadingState: Bool,
+        requestDevicePermission: Bool = false
+    ) {
         guard loadTask == nil else { return }
         if showLoadingState {
             updateEmptyState(isLoading: true)
         }
+        deviceSyncState = requestDevicePermission || deviceContactsService.authorizationState() == .granted
+            ? .syncing
+            : .checking
+        updateListHeader()
+        startSyncGlow()
 
         loadTask = Task { [weak self] in
             guard let self else { return }
+            var loaded = self.contacts
+            var listError: String?
             do {
-                let loaded = try await contactService.listContacts()
-                guard !Task.isCancelled else { return }
-                await MainActor.run {
-                    self.contacts = loaded
-                    self.errorMessage = nil
-                    self.hasLoaded = true
-                    self.applySearch()
-                    self.updateListHeader()
-                    self.startInviteGlow()
-                    self.tableView.refreshControl?.endRefreshing()
-                    self.loadTask = nil
-                }
+                loaded = try await contactService.listContacts()
             } catch {
-                guard !Task.isCancelled else { return }
-                await MainActor.run {
-                    self.errorMessage = error.localizedDescription
-                    self.hasLoaded = true
-                    self.applySearch()
-                    self.updateListHeader()
-                    self.startInviteGlow()
-                    self.tableView.refreshControl?.endRefreshing()
-                    self.loadTask = nil
-                }
+                listError = error.localizedDescription
             }
+
+            guard !Task.isCancelled else { return }
+            let syncResult = await self.synchronizeDeviceContacts(
+                requestPermission: requestDevicePermission,
+                serverContacts: loaded
+            )
+            if syncResult.refreshedServer {
+                listError = nil
+            }
+
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                self.contacts = syncResult.contacts
+                self.errorMessage = listError
+                self.deviceSyncState = syncResult.state
+                self.hasLoaded = true
+                self.applySearch()
+                self.updateListHeader()
+                self.startSyncGlow()
+                self.tableView.refreshControl?.endRefreshing()
+                self.loadTask = nil
+            }
+        }
+    }
+
+    private func synchronizeDeviceContacts(
+        requestPermission: Bool,
+        serverContacts: [Contact]
+    ) async -> (contacts: [Contact], state: DeviceContactSyncUIState, refreshedServer: Bool) {
+        let authorization = requestPermission
+            ? await deviceContactsService.requestAuthorization()
+            : deviceContactsService.authorizationState()
+
+        switch authorization {
+        case .undetermined:
+            return (serverContacts, .permissionRequired, false)
+        case .denied:
+            return (serverContacts, .denied, false)
+        case .restricted:
+            return (serverContacts, .restricted, false)
+        case .granted:
+            break
+        }
+
+        do {
+            let snapshot = try await deviceContactsService.readSnapshot(defaultPhone: currentUser.phone)
+            if snapshot.entries.isEmpty {
+                deviceContactsService.rememberSuccessfulFingerprint(
+                    snapshot.fingerprint,
+                    for: currentUser.id
+                )
+                return (serverContacts, .emptyAddressBook, false)
+            }
+
+            let previousFingerprint = deviceContactsService.lastSuccessfulFingerprint(
+                for: currentUser.id
+            )
+            let serverHasImportedContacts = serverContacts.contains { $0.source == .device }
+            var latestContacts = serverContacts
+            var refreshedServer = false
+
+            if previousFingerprint != snapshot.fingerprint || !serverHasImportedContacts {
+                for entries in deviceContactsService.importBatches(for: snapshot.entries) {
+                    _ = try await contactService.importDeviceContacts(entries: entries)
+                }
+                latestContacts = try await contactService.listContacts()
+                deviceContactsService.rememberSuccessfulFingerprint(
+                    snapshot.fingerprint,
+                    for: currentUser.id
+                )
+                refreshedServer = true
+            }
+
+            let registeredCount = latestContacts.filter {
+                $0.source == .device && $0.contactUserId != nil
+            }.count
+            return (
+                latestContacts,
+                registeredCount > 0 ? .synced(registeredCount) : .noMatches,
+                refreshedServer
+            )
+        } catch {
+            // Keep the last good server list; failed imports never advance the fingerprint.
+            return (serverContacts, .failed, false)
         }
     }
 
@@ -500,7 +623,10 @@ final class ContactsViewController: BaseViewController {
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased() ?? ""
 
-        let filtered = contacts.filter { contact in
+        let visibleContacts = contacts.filter {
+            $0.source == .app || $0.contactUserId != nil
+        }
+        let filtered = visibleContacts.filter { contact in
             guard !query.isEmpty else { return true }
             return contact.name.lowercased().contains(query)
                 || contact.phoneNumber.lowercased().contains(query)
@@ -514,16 +640,26 @@ final class ContactsViewController: BaseViewController {
                 : comparison == .orderedDescending
         }
 
-        var grouped: [String: [Contact]] = [:]
-        sorted.forEach { contact in
-            let trimmed = contact.name.trimmingCharacters(in: .whitespacesAndNewlines)
-            let key = trimmed.first.map { String($0).uppercased() } ?? "#"
-            grouped[key, default: []].append(contact)
+        func makeSections(_ contacts: [Contact], label: String) -> [ContactsSection] {
+            var grouped: [String: [Contact]] = [:]
+            contacts.forEach { contact in
+                let trimmed = contact.name.trimmingCharacters(in: .whitespacesAndNewlines)
+                let key = trimmed.first.map { String($0).uppercased() } ?? "#"
+                grouped[key, default: []].append(contact)
+            }
+
+            return grouped.keys.sorted().map {
+                ContactsSection(title: "\(label) - \($0)", contacts: grouped[$0] ?? [])
+            }
         }
 
-        sections = grouped.keys.sorted().map {
-            ContactsSection(title: $0, contacts: grouped[$0] ?? [])
-        }
+        sections = makeSections(
+            sorted.filter { $0.contactUserId != nil },
+            label: "ON CHITCHAT"
+        ) + makeSections(
+            sorted.filter { $0.contactUserId == nil && $0.source == .app },
+            label: "SAVED"
+        )
         tableView.reloadData()
         updateEmptyState()
     }
@@ -558,9 +694,16 @@ final class ContactsViewController: BaseViewController {
         title.font = ChitChatTypography.contactsEmptyTitle
         title.textColor = ChitChatColors.textPrimary
         title.textAlignment = .center
-        title.text = searchField.text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
-            ? "No contacts found"
-            : "No contacts yet"
+        let isSearching = searchField.text?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .isEmpty == false
+        if isSearching {
+            title.text = "No contacts found"
+        } else if deviceSyncState == .noMatches {
+            title.text = "No registered contacts found"
+        } else {
+            title.text = "No contacts yet"
+        }
         title.isHidden = isLoading || !hasLoaded
 
         let text = UILabel()
@@ -569,12 +712,14 @@ final class ContactsViewController: BaseViewController {
         text.textColor = ChitChatColors.textMuted
         text.textAlignment = .center
         text.numberOfLines = 0
-        if isLoading || !hasLoaded {
-            text.text = "Loading contacts..."
-        } else if searchField.text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false {
+        if isLoading || !hasLoaded || deviceSyncState == .syncing {
+            text.text = deviceSyncState == .syncing ? "Matching contacts..." : "Loading contacts..."
+        } else if isSearching {
             text.text = "Try another search term"
+        } else if deviceSyncState == .emptyAddressBook {
+            text.text = "No phone numbers were found in your address book. Manual Add Contact remains available."
         } else {
-            text.text = "Import device contacts or add a contact to start chatting"
+            text.text = "Match device contacts above or add a contact manually to start chatting"
         }
 
         footer.addSubview(iconCircle)
@@ -748,6 +893,11 @@ final class ContactsViewController: BaseViewController {
         loadContacts(showLoadingState: false)
     }
 
+    @objc private func applicationDidBecomeActive() {
+        guard viewIfLoaded?.window != nil else { return }
+        loadContacts(showLoadingState: false)
+    }
+
     @objc private func addContact() {
         let controller = AddContactViewController(contactService: contactService)
         controller.onContactCreated = { [weak self] contact in
@@ -776,22 +926,48 @@ final class ContactsViewController: BaseViewController {
         applySearch()
     }
 
-    @objc private func invitePressed() {
-        inviteRow.backgroundColor = ChitChatColors.contactsPressed
+    @objc private func syncPressed() {
+        syncRow.backgroundColor = ChitChatColors.contactsPressed
     }
 
-    @objc private func inviteReleased() {
-        inviteRow.backgroundColor = .clear
+    @objc private func syncReleased() {
+        syncRow.backgroundColor = .clear
     }
 
-    @objc private func inviteFriends() {
-        let message = "Join me on ChitChat."
-        let controller = UIActivityViewController(activityItems: [message], applicationActivities: nil)
-        if let popover = controller.popoverPresentationController {
-            popover.sourceView = inviteRow
-            popover.sourceRect = inviteRow.bounds
+    @objc private func deviceContactsTapped() {
+        switch deviceContactsService.authorizationState() {
+        case .granted:
+            loadContacts(showLoadingState: false)
+        case .undetermined:
+            presentContactsRationale()
+        case .denied:
+            openContactSettings()
+        case .restricted:
+            showAlert(message: "Contact access is restricted on this device.")
         }
-        present(controller, animated: true)
+    }
+
+    private func presentContactsRationale() {
+        guard presentedViewController == nil else { return }
+        let alert = UIAlertController(
+            title: "Find ChitChat contacts",
+            message: "ChitChat reads contact names and phone numbers to find people already on ChitChat. Emails, photos, addresses, and notes are not uploaded.",
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: "Not now", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Continue", style: .default) { [weak self] _ in
+            self?.loadContacts(showLoadingState: false, requestDevicePermission: true)
+        })
+        present(alert, animated: true)
+    }
+
+    private func openContactSettings() {
+        guard let url = URL(string: UIApplication.openSettingsURLString),
+              UIApplication.shared.canOpenURL(url) else {
+            showAlert(message: "Open Settings to allow ChitChat contact access.")
+            return
+        }
+        UIApplication.shared.open(url)
     }
 }
 

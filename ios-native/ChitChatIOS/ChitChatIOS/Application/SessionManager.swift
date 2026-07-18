@@ -161,6 +161,9 @@ final class SessionManager {
     }
 
     func signOut() {
+        if let userID = currentUser?.id {
+            DeviceContactsService().clearFingerprint(for: userID)
+        }
         SocketService.shared.disconnect()
         accessToken = nil
         refreshToken = nil

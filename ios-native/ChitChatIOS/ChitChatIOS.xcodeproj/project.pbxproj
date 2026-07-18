@@ -66,6 +66,7 @@
 		J10000000000000000000002 /* PushNotificationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = J10000000000000000000022 /* PushNotificationService.swift */; };
 		J10000000000000000000003 /* NotificationRouter.swift in Sources */ = {isa = PBXBuildFile; fileRef = J10000000000000000000023 /* NotificationRouter.swift */; };
 		J10000000000000000000004 /* NotificationSettingsViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = J10000000000000000000024 /* NotificationSettingsViewController.swift */; };
+		K20000000000000000000001 /* DeviceContactsService.swift in Sources */ = {isa = PBXBuildFile; fileRef = K20000000000000000000021 /* DeviceContactsService.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -128,6 +129,7 @@
 		J10000000000000000000022 /* PushNotificationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PushNotificationService.swift; sourceTree = "<group>"; };
 		J10000000000000000000023 /* NotificationRouter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationRouter.swift; sourceTree = "<group>"; };
 		J10000000000000000000024 /* NotificationSettingsViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationSettingsViewController.swift; sourceTree = "<group>"; };
+		K20000000000000000000021 /* DeviceContactsService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceContactsService.swift; sourceTree = "<group>"; };
 		J10000000000000000000025 /* ChitChatIOS.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ChitChatIOS.entitlements; sourceTree = "<group>"; };
 		J10000000000000000000026 /* ChitChatIOS.Release.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ChitChatIOS.Release.entitlements; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -221,6 +223,7 @@
 				I90000000000000000000022 /* StatusService.swift */,
 				J10000000000000000000022 /* PushNotificationService.swift */,
 				J10000000000000000000023 /* NotificationRouter.swift */,
+				K20000000000000000000021 /* DeviceContactsService.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -401,6 +404,7 @@
 				J10000000000000000000002 /* PushNotificationService.swift in Sources */,
 				J10000000000000000000003 /* NotificationRouter.swift in Sources */,
 				J10000000000000000000004 /* NotificationSettingsViewController.swift in Sources */,
+				K20000000000000000000001 /* DeviceContactsService.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

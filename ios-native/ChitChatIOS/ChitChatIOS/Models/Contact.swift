@@ -26,3 +26,18 @@ struct CreateContactRequest: Encodable {
     let source: ContactSource
     let label: String?
 }
+
+struct ImportDeviceContactEntry: Codable, Equatable {
+    let name: String
+    let phones: [String]
+}
+
+struct ImportDeviceContactsRequest: Encodable {
+    let entries: [ImportDeviceContactEntry]
+}
+
+struct ImportDeviceContactsResponse: Decodable {
+    let matched: Int
+    let imported: Int
+    let contacts: [Contact]
+}

@@ -31,4 +31,14 @@ final class ContactService {
             )
         )
     }
+
+    func importDeviceContacts(
+        entries: [ImportDeviceContactEntry]
+    ) async throws -> ImportDeviceContactsResponse {
+        try await apiClient.request(
+            "/api/v1/contacts/import-device",
+            method: .post,
+            body: ImportDeviceContactsRequest(entries: entries)
+        )
+    }
 }
