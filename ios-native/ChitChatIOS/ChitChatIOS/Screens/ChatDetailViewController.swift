@@ -2015,7 +2015,7 @@ final class ChatDetailViewController: BaseViewController {
     private func markVisibleIncomingMessagesRead() {
         guard receiptTask == nil, canMarkMessagesRead else { return }
         let visibleIDs = visibleMessageIDs
-        let candidates = messages.filter { message in
+        let unreadCandidates = messages.filter { message in
             let messageID = normalizedMessageID(message.id)
             let isAlreadyRead = message.readBy.contains { $0.userId == currentUser.id }
             return visibleIDs.contains(messageID) &&
@@ -2025,48 +2025,46 @@ final class ChatDetailViewController: BaseViewController {
                 !isAlreadyRead &&
                 !readInFlightMessageIDs.contains(messageID)
         }
-        guard !candidates.isEmpty else { return }
-        candidates.forEach { readInFlightMessageIDs.insert(normalizedMessageID($0.id)) }
+        let target = unreadCandidates.last ?? (chat.unreadCount > 0
+            ? messages.last(where: {
+                visibleIDs.contains(normalizedMessageID($0.id)) && !$0.isDeletedForMe
+            })
+            : nil)
+        guard let target else { return }
+        let targetID = normalizedMessageID(target.id)
+        guard !readInFlightMessageIDs.contains(targetID) else { return }
+        readInFlightMessageIDs.insert(targetID)
 
         receiptTask = Task { [weak self] in
             guard let self else { return }
-            for message in candidates {
-                if Task.isCancelled { break }
-                let messageID = self.normalizedMessageID(message.id)
-                guard self.canMarkMessagesRead, self.visibleMessageIDs.contains(messageID) else {
-                    self.readInFlightMessageIDs.remove(messageID)
-                    continue
-                }
+            guard self.canMarkMessagesRead, self.visibleMessageIDs.contains(targetID) else {
+                self.readInFlightMessageIDs.remove(targetID)
+                self.receiptTask = nil
+                return
+            }
 
-                do {
-                    let updated = try await self.acknowledgeRead(messageID: message.id)
-                    if Task.isCancelled {
-                        self.readInFlightMessageIDs.remove(messageID)
-                        break
-                    }
+            do {
+                let result = try await self.acknowledgeRead(messageID: target.id)
+                if !Task.isCancelled {
                     await MainActor.run {
-                        self.mergeMutationMessage(updated)
+                        self.mergeMutationMessage(result.message)
+                        self.chat = self.chat.updatingUnreadCount(result.unreadCount)
                     }
-                } catch {
-                    #if DEBUG
-                    print("[receipts] read acknowledgement failed", messageID, error.localizedDescription)
-                    #endif
                 }
-                await MainActor.run {
-                    self.readInFlightMessageIDs.remove(messageID)
-                }
+            } catch {
+                #if DEBUG
+                print("[receipts] read acknowledgement failed", targetID, error.localizedDescription)
+                #endif
             }
 
             await MainActor.run {
-                candidates.forEach {
-                    self.readInFlightMessageIDs.remove(self.normalizedMessageID($0.id))
-                }
+                self.readInFlightMessageIDs.remove(targetID)
                 self.receiptTask = nil
             }
         }
     }
 
-    private func acknowledgeRead(messageID: String) async throws -> Message {
+    private func acknowledgeRead(messageID: String) async throws -> MarkReadResponse {
         if SocketService.shared.isConnected {
             do {
                 return try await SocketService.shared.markRead(chatId: chat.id, messageId: messageID)

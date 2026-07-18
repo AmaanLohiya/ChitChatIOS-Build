@@ -360,6 +360,24 @@ final class ChatsViewController: BaseViewController {
                 self.mergePresence(event)
             }
         )
+        socketObservers.append(
+            NotificationCenter.default.addObserver(
+                forName: .socketConnected,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                self?.loadChats(showLoadingState: false)
+            }
+        )
+        socketObservers.append(
+            NotificationCenter.default.addObserver(
+                forName: UIApplication.didBecomeActiveNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                self?.loadChats(showLoadingState: false)
+            }
+        )
     }
 
     private func mergeRealtimeChat(_ chat: Chat) {
@@ -406,6 +424,12 @@ final class ChatsViewController: BaseViewController {
         }
         tableView.reloadData()
         updateEmptyState()
+        updateUnreadBadge()
+    }
+
+    private func updateUnreadBadge() {
+        let total = chats.reduce(0) { $0 + max(0, $1.unreadCount) }
+        (tabBarController as? MainTabBarController)?.updateChatsUnreadBadge(total: total)
     }
 
     private func updateEmptyState() {

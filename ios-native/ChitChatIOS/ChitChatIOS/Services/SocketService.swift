@@ -196,13 +196,22 @@ final class SocketService {
         isConnected && joinedChatIDs.contains(chatId)
     }
 
-    func markRead(chatId: String, messageId: String) async throws -> Message {
+    func markRead(chatId: String, messageId: String) async throws -> MarkReadResponse {
         let response = try await emitAcknowledgedResponse(
             "message:read",
             payload: ["chatId": chatId, "messageId": messageId],
             timeout: 8
         )
-        return try Self.message(fromAcknowledgement: response)
+        guard
+            let responseData = response["data"] as? [String: Any],
+            let messageValue = responseData["message"],
+            let message = Self.decode(Message.self, from: messageValue),
+            let unreadCount = (responseData["unreadCount"] as? Int)
+                ?? (responseData["unreadCount"] as? NSNumber)?.intValue
+        else {
+            throw SocketServiceError.invalidPayload
+        }
+        return MarkReadResponse(message: message, unreadCount: unreadCount)
     }
 
     func sendText(chatId: String, text: String) async throws -> Message {

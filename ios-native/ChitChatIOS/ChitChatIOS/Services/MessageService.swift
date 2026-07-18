@@ -1,5 +1,10 @@
 import Foundation
 
+struct MarkReadResponse: Decodable {
+    let message: Message
+    let unreadCount: Int
+}
+
 final class MessageService {
     private let apiClient: APIClient
 
@@ -80,7 +85,7 @@ final class MessageService {
         )
     }
 
-    func markRead(chatId: String, messageId: String) async throws -> Message {
+    func markRead(chatId: String, messageId: String) async throws -> MarkReadResponse {
         try await apiClient.request(
             "/api/v1/chats/\(chatId)/messages/\(messageId)/read",
             method: .post

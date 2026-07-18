@@ -114,6 +114,17 @@ final class MainTabBarController: UITabBarController {
         ]
     }
 
+    func updateChatsUnreadBadge(total: Int) {
+        let normalizedTotal = max(0, total)
+        let item = tabBar.items?.first
+        item?.badgeValue = normalizedTotal == 0
+            ? nil
+            : normalizedTotal > 99 ? "99+" : String(normalizedTotal)
+        item?.accessibilityLabel = normalizedTotal == 0
+            ? "Chats"
+            : "Chats, \(normalizedTotal) unread messages"
+    }
+
     private func configureTabBar() {
         let appearance = UITabBarAppearance()
         appearance.configureWithOpaqueBackground()

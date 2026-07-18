@@ -332,10 +332,12 @@ final class ChatCell: UITableViewCell {
         pinIcon.isHidden = !chat.isPinned
         mutedIcon.isHidden = !chat.isMuted
 
-        // Backend unread counts are not exposed yet; RN maps this value to zero.
-        unreadBubble.isHidden = true
-        unreadLabel.text = nil
+        let unreadCount = max(0, chat.unreadCount)
+        unreadBubble.isHidden = unreadCount == 0
+        unreadLabel.text = unreadCount > 99 ? "99+" : String(unreadCount)
+        timeLabel.textColor = unreadCount > 0 ? ChitChatColors.accent : ChitChatColors.textMuted
 
-        accessibilityLabel = "\(displayName), \(previewLabel.text ?? "")"
+        let unreadDescription = unreadCount > 0 ? ", \(unreadCount) unread messages" : ""
+        accessibilityLabel = "\(displayName), \(previewLabel.text ?? "")\(unreadDescription)"
     }
 }

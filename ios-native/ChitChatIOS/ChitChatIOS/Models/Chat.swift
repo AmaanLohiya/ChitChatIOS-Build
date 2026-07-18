@@ -62,6 +62,7 @@ struct Chat: Codable, Equatable {
     let lastMessageId: String?
     let lastMessagePreview: String
     let lastMessageAt: String?
+    let unreadCount: Int
     let isMuted: Bool
     let mutedUntil: String?
     let isPinned: Bool
@@ -104,6 +105,28 @@ struct Chat: Codable, Equatable {
             lastMessageId: lastMessageId,
             lastMessagePreview: lastMessagePreview,
             lastMessageAt: lastMessageAt,
+            unreadCount: unreadCount,
+            isMuted: isMuted,
+            mutedUntil: mutedUntil,
+            isPinned: isPinned,
+            isArchived: isArchived,
+            createdAt: createdAt,
+            updatedAt: updatedAt
+        )
+    }
+
+    func updatingUnreadCount(_ unreadCount: Int) -> Chat {
+        Chat(
+            id: id,
+            type: type,
+            name: name,
+            avatarUrl: avatarUrl,
+            members: members,
+            createdBy: createdBy,
+            lastMessageId: lastMessageId,
+            lastMessagePreview: lastMessagePreview,
+            lastMessageAt: lastMessageAt,
+            unreadCount: max(0, unreadCount),
             isMuted: isMuted,
             mutedUntil: mutedUntil,
             isPinned: isPinned,
