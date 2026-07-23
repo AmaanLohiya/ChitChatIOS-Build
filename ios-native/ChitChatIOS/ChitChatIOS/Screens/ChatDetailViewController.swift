@@ -10,6 +10,8 @@ private enum MediaSendError: LocalizedError {
     case sendFailed
     case previewDownloadFailed
     case cannotOpenDocument
+    case voiceRecordingUnavailable
+    case voiceRecordingInCall
 
     var errorDescription: String? {
         switch self {
@@ -25,6 +27,10 @@ private enum MediaSendError: LocalizedError {
             return "Document preview could not be downloaded."
         case .cannotOpenDocument:
             return "Document could not be opened."
+        case .voiceRecordingUnavailable:
+            return "Recording is no longer available. Record it again."
+        case .voiceRecordingInCall:
+            return "End the current call before recording a voice note."
         }
     }
 }
@@ -40,6 +46,7 @@ private enum PendingMessagePayload {
         messageType: MessageType,
         text: String?,
         localFileSize: Int?,
+        localDuration: Double?,
         replyToMessageId: String?
     )
 }
@@ -50,6 +57,7 @@ private struct PendingMessageSend {
     var state: MessageLocalSendState
     var attempts: Int
     var isInFlight: Bool
+    var cleanupFileURL: URL?
 }
 
 private enum PickedMediaFile {
@@ -467,7 +475,10 @@ final class ChatDetailViewController: BaseViewController {
     private let composerContextTitle = UILabel()
     private let composerContextSummary = UILabel()
     private let composerContextCloseButton = UIButton(type: .system)
+    private let voiceNoteComposer = VoiceNoteComposerView()
     private let inputBar = MessageInputBar()
+    private let voiceNoteRecorder = VoiceNoteRecorder()
+    private let voiceNotePlayback = VoiceNotePlaybackCoordinator()
 
     private var stateOverlay: UIView?
     private var messages: [Message] = []
@@ -484,6 +495,10 @@ final class ChatDetailViewController: BaseViewController {
     private var documentPreviewDataSource: DocumentPreviewDataSource?
     private var documentInteractionController: UIDocumentInteractionController?
     private var composerContextHeightConstraint: NSLayoutConstraint?
+    private var voiceNoteComposerHeightConstraint: NSLayoutConstraint?
+    private var voiceNotePermissionTask: Task<Void, Never>?
+    private var voiceNoteDraft: VoiceNoteRecording?
+    private var pendingVoiceNoteInterruptionMessage: String?
     private var replyToMessageID: String?
     private var editingMessageID: String?
     private var composerDraftBeforeEdit: String?
@@ -565,6 +580,7 @@ final class ChatDetailViewController: BaseViewController {
         if isMovingFromParent || navigationController?.isBeingDismissed == true {
             actionTask?.cancel()
             actionTask = nil
+            discardVoiceNote()
             SocketService.shared.leaveChat(chat.id)
         }
     }
@@ -576,10 +592,16 @@ final class ChatDetailViewController: BaseViewController {
         mediaTask?.cancel()
         documentPreviewTask?.cancel()
         actionTask?.cancel()
+        voiceNotePermissionTask?.cancel()
         receiptTask?.cancel()
         presenceRefreshTask?.cancel()
         localTypingStopWorkItem?.cancel()
         remoteTypingWorkItems.values.forEach { $0.cancel() }
+        voiceNoteRecorder.cancel()
+        voiceNotePlayback.stop()
+        pendingSends.values.forEach {
+            VoiceNoteRecorder.removeTemporaryFile(at: $0.cleanupFileURL)
+        }
         pendingSends.removeAll()
         headerAvatar.cancelImageLoad()
         socketObservers.forEach { NotificationCenter.default.removeObserver($0) }
@@ -914,8 +936,46 @@ final class ChatDetailViewController: BaseViewController {
         inputBar.onAttach = { [weak self] in
             self?.showAttachmentSheet()
         }
+        inputBar.onVoice = { [weak self] in
+            self?.startVoiceNoteRecording()
+        }
         inputBar.onTextChanged = { [weak self] text in
             self?.handleInputTextChanged(text)
+        }
+        voiceNoteComposer.onStop = { [weak self] in
+            self?.finishVoiceNoteRecording()
+        }
+        voiceNoteComposer.onCancel = { [weak self] in
+            self?.discardVoiceNote()
+        }
+        voiceNoteComposer.onPlayPause = { [weak self] in
+            self?.toggleVoiceNotePreview()
+        }
+        voiceNoteComposer.onSend = { [weak self] in
+            self?.sendVoiceNoteDraft()
+        }
+        voiceNoteComposer.onSeek = { [weak self] seconds in
+            self?.voiceNotePlayback.seek(to: seconds)
+        }
+        voiceNoteRecorder.onDurationChanged = { [weak self] duration in
+            guard let self else { return }
+            if self.isChitChatCallInterfaceActive {
+                self.discardVoiceNote()
+                self.showAlert(message: MediaSendError.voiceRecordingInCall.localizedDescription)
+                return
+            }
+            self.voiceNoteComposer.updateRecordingDuration(duration)
+        }
+        voiceNoteRecorder.onAutomaticStop = { [weak self] result in
+            self?.handleCompletedVoiceNote(result)
+        }
+        voiceNoteRecorder.onInterrupted = { [weak self] message in
+            self?.hideVoiceNoteComposer()
+            self?.inputBar.setSending(false)
+            self?.showAlert(message: message)
+        }
+        voiceNotePlayback.onStateChanged = { [weak self] state in
+            self?.handleVoicePlaybackState(state)
         }
 
         composerContextView.translatesAutoresizingMaskIntoConstraints = false
@@ -954,6 +1014,7 @@ final class ChatDetailViewController: BaseViewController {
         )
 
         view.addSubview(composerContextView)
+        view.addSubview(voiceNoteComposer)
         view.addSubview(inputBar)
         composerContextView.addSubview(composerContextAccent)
         composerContextView.addSubview(composerContextTitle)
@@ -962,12 +1023,19 @@ final class ChatDetailViewController: BaseViewController {
 
         let contextHeight = composerContextView.heightAnchor.constraint(equalToConstant: 0)
         composerContextHeightConstraint = contextHeight
+        let voiceComposerHeight = voiceNoteComposer.heightAnchor.constraint(equalToConstant: 0)
+        voiceNoteComposerHeightConstraint = voiceComposerHeight
 
         NSLayoutConstraint.activate([
             composerContextView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             composerContextView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             composerContextView.bottomAnchor.constraint(equalTo: inputBar.topAnchor),
             contextHeight,
+
+            voiceNoteComposer.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            voiceNoteComposer.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            voiceNoteComposer.bottomAnchor.constraint(equalTo: composerContextView.topAnchor),
+            voiceComposerHeight,
 
             composerContextAccent.leadingAnchor.constraint(equalTo: composerContextView.leadingAnchor, constant: 18),
             composerContextAccent.centerYAnchor.constraint(equalTo: composerContextView.centerYAnchor),
@@ -1005,8 +1073,212 @@ final class ChatDetailViewController: BaseViewController {
             tableView.topAnchor.constraint(equalTo: headerView.bottomAnchor),
             tableView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             tableView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            tableView.bottomAnchor.constraint(equalTo: composerContextView.topAnchor)
+            tableView.bottomAnchor.constraint(equalTo: voiceNoteComposer.topAnchor)
         ])
+    }
+
+    private var isChitChatCallInterfaceActive: Bool {
+        func containsCallController(_ controller: UIViewController?) -> Bool {
+            guard let controller else { return false }
+            if controller is VoiceCallViewController || controller is VideoCallViewController {
+                return true
+            }
+            if containsCallController(controller.presentedViewController) {
+                return true
+            }
+            if let navigation = controller as? UINavigationController,
+               containsCallController(navigation.visibleViewController) {
+                return true
+            }
+            return controller.children.contains { containsCallController($0) }
+        }
+
+        return containsCallController(view.window?.rootViewController)
+    }
+
+    private func startVoiceNoteRecording() {
+        guard
+            voiceNotePermissionTask == nil,
+            !voiceNoteRecorder.isRecording,
+            voiceNoteDraft == nil,
+            sendTask == nil,
+            mediaTask == nil
+        else { return }
+        guard !isChitChatCallInterfaceActive else {
+            showAlert(message: MediaSendError.voiceRecordingInCall.localizedDescription)
+            return
+        }
+
+        stopLocalTyping()
+        voiceNotePlayback.stop()
+        inputBar.setSending(true)
+        voiceNotePermissionTask = Task { [weak self] in
+            let granted = await VoiceNoteRecorder.requestPermission()
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                guard let self else { return }
+                self.voiceNotePermissionTask = nil
+                guard granted else {
+                    self.inputBar.setSending(false)
+                    self.presentMicrophoneSettingsAlert()
+                    return
+                }
+                guard !self.isChitChatCallInterfaceActive else {
+                    self.inputBar.setSending(false)
+                    self.showAlert(message: MediaSendError.voiceRecordingInCall.localizedDescription)
+                    return
+                }
+                do {
+                    try self.voiceNoteRecorder.start()
+                    self.voiceNoteComposerHeightConstraint?.constant = 104
+                    self.voiceNoteComposer.showRecording(duration: 0)
+                    UIView.animate(withDuration: 0.2) {
+                        self.view.layoutIfNeeded()
+                    }
+                } catch {
+                    self.inputBar.setSending(false)
+                    self.showAlert(message: error.localizedDescription)
+                }
+            }
+        }
+    }
+
+    private func finishVoiceNoteRecording() {
+        guard voiceNoteRecorder.isRecording else { return }
+        do {
+            handleCompletedVoiceNote(.success(try voiceNoteRecorder.stop()))
+        } catch {
+            handleCompletedVoiceNote(.failure(error))
+        }
+    }
+
+    private func handleCompletedVoiceNote(_ result: Result<VoiceNoteRecording, Error>) {
+        switch result {
+        case .success(let recording):
+            voiceNoteDraft = recording
+            voiceNoteComposer.showPreview(
+                recording: recording,
+                playback: .idle(sourceID: voiceNoteDraftSourceID, duration: recording.duration)
+            )
+        case .failure(let error):
+            hideVoiceNoteComposer()
+            inputBar.setSending(false)
+            showAlert(message: error.localizedDescription)
+        }
+    }
+
+    private var voiceNoteDraftSourceID: String {
+        "voice-draft-\(chat.id)"
+    }
+
+    private func toggleVoiceNotePreview() {
+        guard let draft = voiceNoteDraft else { return }
+        do {
+            try voiceNotePlayback.toggle(
+                sourceID: voiceNoteDraftSourceID,
+                url: draft.fileURL,
+                declaredDuration: draft.duration
+            )
+        } catch {
+            showAlert(message: error.localizedDescription)
+        }
+    }
+
+    private func sendVoiceNoteDraft() {
+        guard let draft = voiceNoteDraft, mediaTask == nil, sendTask == nil else { return }
+        voiceNotePlayback.stop()
+        voiceNoteDraft = nil
+        hideVoiceNoteComposer()
+        uploadAndSendMedia(
+            fileURL: draft.fileURL,
+            fileName: draft.fileName,
+            mimeType: draft.mimeType,
+            usage: .voice,
+            resourceType: .raw,
+            messageType: .voice,
+            text: nil,
+            localDuration: draft.duration,
+            cleanupFileURL: draft.fileURL
+        )
+    }
+
+    private func discardVoiceNote() {
+        voiceNotePermissionTask?.cancel()
+        voiceNotePermissionTask = nil
+        voiceNoteRecorder.cancel()
+        voiceNotePlayback.stop()
+        VoiceNoteRecorder.removeTemporaryFile(at: voiceNoteDraft?.fileURL)
+        voiceNoteDraft = nil
+        hideVoiceNoteComposer()
+        if sendTask == nil, mediaTask == nil {
+            inputBar.setSending(false)
+        }
+    }
+
+    private func hideVoiceNoteComposer() {
+        voiceNoteComposer.reset()
+        voiceNoteComposerHeightConstraint?.constant = 0
+        UIView.animate(withDuration: 0.18) {
+            self.view.layoutIfNeeded()
+        }
+    }
+
+    private func presentMicrophoneSettingsAlert() {
+        let alert = UIAlertController(
+            title: "Microphone permission required",
+            message: "Allow microphone access in Settings to record voice notes.",
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Open Settings", style: .default) { _ in
+            guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+            UIApplication.shared.open(url)
+        })
+        present(alert, animated: true)
+    }
+
+    private func handleVoicePlaybackState(_ state: VoiceNotePlaybackState) {
+        if (state.isPlaying || state.isBuffering), isChitChatCallInterfaceActive {
+            voiceNotePlayback.stop()
+            return
+        }
+        if let draft = voiceNoteDraft, state.sourceID == voiceNoteDraftSourceID {
+            voiceNoteComposer.updatePreview(state, fallbackDuration: draft.duration)
+        }
+        for indexPath in tableView.indexPathsForVisibleRows ?? [] {
+            guard
+                indexPath.row < messages.count,
+                let cell = tableView.cellForRow(at: indexPath) as? MessageBubbleCell
+            else { continue }
+            let message = messages[indexPath.row]
+            guard message.type == .voice || message.type == .audio else { continue }
+            let duration = message.primaryAttachment?.duration ?? 0
+            let cellState = state.sourceID == message.id
+                ? state
+                : .idle(duration: duration)
+            cell.updateVoicePlayback(cellState, messageID: message.id)
+        }
+    }
+
+    private func toggleVoicePlayback(for message: Message) {
+        guard
+            !message.isDeletedForEveryone,
+            let attachment = message.primaryAttachment,
+            let url = URL(string: attachment.url),
+            !attachment.url.isEmpty
+        else {
+            showAlert(message: VoiceNoteAudioError.unsupportedURL.localizedDescription)
+            return
+        }
+        do {
+            try voiceNotePlayback.toggle(
+                sourceID: message.id,
+                url: url,
+                declaredDuration: attachment.duration ?? 0
+            )
+        } catch {
+            showAlert(message: error.localizedDescription)
+        }
     }
 
     private func loadMessages() {
@@ -1032,7 +1304,7 @@ final class ChatDetailViewController: BaseViewController {
                         }
                         page.values.forEach { message in
                             if let clientSendId = message.clientSendId {
-                                self.pendingSends.removeValue(forKey: clientSendId)
+                                self.releasePendingSend(clientSendId)
                             }
                         }
                         self.messages = page.values.filter { !$0.isDeletedForMe }
@@ -1257,7 +1529,8 @@ final class ChatDetailViewController: BaseViewController {
     private func enqueuePendingMessage(
         _ message: Message,
         payload: PendingMessagePayload,
-        usesMediaTask: Bool
+        usesMediaTask: Bool,
+        cleanupFileURL: URL? = nil
     ) {
         guard let clientSendId = message.clientSendId else { return }
         pendingSends[clientSendId] = PendingMessageSend(
@@ -1265,7 +1538,8 @@ final class ChatDetailViewController: BaseViewController {
             payload: payload,
             state: .sending,
             attempts: 0,
-            isInFlight: false
+            isInFlight: false,
+            cleanupFileURL: cleanupFileURL
         )
         messages.append(message)
         messages.sort(by: sortMessages)
@@ -1334,11 +1608,14 @@ final class ChatDetailViewController: BaseViewController {
             messageType,
             text,
             localFileSize,
+            localDuration,
             replyToMessageId
         ):
             if pending.attempts > 1,
                !FileManager.default.fileExists(atPath: fileURL.path) {
-                throw MediaSendError.selectedFileUnavailable
+                throw messageType == .voice
+                    ? MediaSendError.voiceRecordingUnavailable
+                    : MediaSendError.selectedFileUnavailable
             }
             let upload: Upload
             do {
@@ -1352,7 +1629,17 @@ final class ChatDetailViewController: BaseViewController {
             } catch {
                 throw MediaSendError.uploadFailed
             }
-            let attachment = upload.attachment.resolvingSize(localFileSize)
+            let uploadAttachment = upload.attachment.resolvingSize(localFileSize)
+            let attachment = MessageAttachment(
+                url: uploadAttachment.url,
+                mimeType: uploadAttachment.mimeType,
+                fileName: uploadAttachment.fileName,
+                size: uploadAttachment.size,
+                duration: localDuration ?? uploadAttachment.duration,
+                width: uploadAttachment.width,
+                height: uploadAttachment.height,
+                thumbnailUrl: uploadAttachment.thumbnailUrl
+            )
             request = CreateMessageRequest(
                 type: messageType,
                 text: text,
@@ -1364,6 +1651,7 @@ final class ChatDetailViewController: BaseViewController {
                 guard var latest = self.pendingSends[clientSendId] else { return }
                 latest.payload = .ready(request)
                 self.pendingSends[clientSendId] = latest
+                self.reloadPendingMessage(clientSendId)
             }
         }
 
@@ -1395,7 +1683,10 @@ final class ChatDetailViewController: BaseViewController {
         let usesMediaTask: Bool
         switch pending.payload {
         case .ready(let request):
-            usesMediaTask = request.type == .image || request.type == .document
+            usesMediaTask = request.type == .image
+                || request.type == .document
+                || request.type == .voice
+                || request.type == .audio
         case .upload:
             usesMediaTask = true
         }
@@ -1602,7 +1893,9 @@ final class ChatDetailViewController: BaseViewController {
         usage: UploadUsage,
         resourceType: UploadResourceType,
         messageType: MessageType,
-        text: String?
+        text: String?,
+        localDuration: Double? = nil,
+        cleanupFileURL: URL? = nil
     ) {
         guard mediaTask == nil, sendTask == nil else { return }
         let localFileSize = PickedMediaFile.fileSize(at: fileURL)
@@ -1614,7 +1907,7 @@ final class ChatDetailViewController: BaseViewController {
             mimeType: mimeType,
             fileName: fileName,
             size: localFileSize,
-            duration: nil,
+            duration: localDuration,
             width: nil,
             height: nil,
             thumbnailUrl: nil
@@ -1640,9 +1933,11 @@ final class ChatDetailViewController: BaseViewController {
                 messageType: messageType,
                 text: text,
                 localFileSize: localFileSize,
+                localDuration: localDuration,
                 replyToMessageId: replyMessageID
             ),
-            usesMediaTask: true
+            usesMediaTask: true,
+            cleanupFileURL: cleanupFileURL
         )
         clearComposerContextState(restoreDraft: false)
     }
@@ -2360,7 +2655,7 @@ final class ChatDetailViewController: BaseViewController {
         guard !messageID.isEmpty else { return false }
 
         if let clientSendId = message.clientSendId, !clientSendId.isEmpty {
-            pendingSends.removeValue(forKey: clientSendId)
+            releasePendingSend(clientSendId)
             messages.removeAll {
                 $0.clientSendId == clientSendId && normalizedMessageID($0.id) != messageID
             }
@@ -2381,6 +2676,15 @@ final class ChatDetailViewController: BaseViewController {
         }
         messages.sort(by: sortMessages)
         return true
+    }
+
+    private func releasePendingSend(_ clientSendId: String) {
+        guard let pending = pendingSends.removeValue(forKey: clientSendId) else { return }
+        if let localMessage = messages.first(where: { $0.clientSendId == clientSendId }),
+           voiceNotePlayback.state.sourceID == localMessage.id {
+            voiceNotePlayback.stop()
+        }
+        VoiceNoteRecorder.removeTemporaryFile(at: pending.cleanupFileURL)
     }
 
     private func acknowledgeRead(messageID: String) async throws -> MarkReadResponse {
@@ -2463,6 +2767,10 @@ final class ChatDetailViewController: BaseViewController {
                 [weak self] _ in
                 guard let self else { return }
                 self.isApplicationActive = true
+                if let message = self.pendingVoiceNoteInterruptionMessage {
+                    self.pendingVoiceNoteInterruptionMessage = nil
+                    self.showAlert(message: message)
+                }
                 self.clearRemoteTypingUsers()
                 self.refreshChatPresence()
                 if self.isViewVisible {
@@ -2475,6 +2783,13 @@ final class ChatDetailViewController: BaseViewController {
             center.addObserver(forName: UIApplication.willResignActiveNotification, object: nil, queue: .main) {
                 [weak self] _ in
                 self?.isApplicationActive = false
+                if self?.voiceNoteRecorder.isRecording == true || self?.voiceNoteDraft != nil {
+                    self?.discardVoiceNote()
+                    self?.pendingVoiceNoteInterruptionMessage =
+                        "Voice-note recording stopped when ChitChat left the foreground."
+                } else {
+                    self?.voiceNotePlayback.stop()
+                }
                 self?.stopLocalTyping()
                 self?.clearRemoteTypingUsers()
                 self?.receiptTask?.cancel()
@@ -2663,6 +2978,10 @@ final class ChatDetailViewController: BaseViewController {
     }
 
     @objc private func startVoiceCall() {
+        guard !voiceNoteRecorder.isRecording, voiceNoteDraft == nil else {
+            showAlert(message: "Discard or send the voice note before starting a call.")
+            return
+        }
         guard chat.type == .direct else {
             showAlert(message: "Voice calls are available only in direct chats.")
             return
@@ -2671,6 +2990,7 @@ final class ChatDetailViewController: BaseViewController {
             showAlert(message: "Voice calls are available only in direct chats.")
             return
         }
+        voiceNotePlayback.stop()
         VoiceCallService.shared.startOutgoingVoiceCall(
             chat: chat,
             currentUser: currentUser,
@@ -2679,6 +2999,10 @@ final class ChatDetailViewController: BaseViewController {
     }
 
     @objc private func startVideoCall() {
+        guard !voiceNoteRecorder.isRecording, voiceNoteDraft == nil else {
+            showAlert(message: "Discard or send the voice note before starting a call.")
+            return
+        }
         guard chat.type == .direct else {
             showAlert(message: "Video calls are available only in direct chats.")
             return
@@ -2687,6 +3011,7 @@ final class ChatDetailViewController: BaseViewController {
             showAlert(message: "Video calls are available only in direct chats.")
             return
         }
+        voiceNotePlayback.stop()
         VoiceCallService.shared.startOutgoingVideoCall(
             chat: chat,
             currentUser: currentUser,
@@ -2709,6 +3034,17 @@ extension ChatDetailViewController: UITableViewDataSource, UITableViewDelegate {
         }
         let message = messages[indexPath.row]
         let localSendState = message.clientSendId.flatMap { pendingSends[$0]?.state }
+        let localSendLabel: String? = message.clientSendId.flatMap { clientSendId in
+            guard let pending = pendingSends[clientSendId], pending.state == .sending else { return nil }
+            if case let .upload(_, _, _, _, _, messageType, _, _, _, _) = pending.payload,
+               messageType == .voice || messageType == .audio {
+                return "Uploading voice note..."
+            }
+            return "Sending..."
+        }
+        let voiceState = voiceNotePlayback.state.sourceID == message.id
+            ? voiceNotePlayback.state
+            : nil
         cell.configure(
             message: message,
             isOutgoing: message.senderId == currentUser.id,
@@ -2716,9 +3052,25 @@ extension ChatDetailViewController: UITableViewDataSource, UITableViewDelegate {
             currentUserId: currentUser.id,
             status: message.status(activeParticipantIDs: activeParticipantIDs),
             localSendState: localSendState,
+            localSendLabel: localSendLabel,
             onRetry: { [weak self] in
                 guard let clientSendId = message.clientSendId else { return }
                 self?.retryPendingMessage(clientSendId)
+            },
+            voicePlaybackState: voiceState,
+            onVoiceToggle: { [weak self] in
+                self?.toggleVoicePlayback(for: message)
+            },
+            onVoiceSeek: { [weak self] seconds in
+                guard let self else { return }
+                if self.voiceNotePlayback.state.sourceID != message.id {
+                    self.toggleVoicePlayback(for: message)
+                }
+                self.voiceNotePlayback.seek(to: seconds)
+            },
+            onVoiceStop: { [weak self] in
+                guard self?.voiceNotePlayback.state.sourceID == message.id else { return }
+                self?.voiceNotePlayback.stop()
             }
         )
         return cell

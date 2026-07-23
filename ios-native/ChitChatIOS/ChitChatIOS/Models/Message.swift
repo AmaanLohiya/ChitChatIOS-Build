@@ -227,6 +227,8 @@ struct Message: Codable, Equatable {
             return text.isEmpty ? "Photo" : text
         case .document:
             return primaryAttachment?.fileName ?? "Document"
+        case .voice, .audio:
+            return "Voice message"
         default:
             return type.rawValue.capitalized
         }

@@ -234,6 +234,9 @@ final class MessageBubbleCell: UITableViewCell {
     private let documentSizeLabel = UILabel()
     private let documentDivider = UIView()
     private let documentHintLabel = UILabel()
+    private let voicePlayButton = UIButton(type: .system)
+    private let voiceSlider = UISlider()
+    private let voiceDurationLabel = UILabel()
     private let timeLabel = UILabel()
     private let readView = MessageReadView()
     private let reactionPill = UIView()
@@ -251,6 +254,10 @@ final class MessageBubbleCell: UITableViewCell {
     private var imageTask: URLSessionDataTask?
     private var representedImageURL: String?
     private var retryHandler: (() -> Void)?
+    private var voiceToggleHandler: (() -> Void)?
+    private var voiceSeekHandler: ((TimeInterval) -> Void)?
+    private var voiceStopHandler: (() -> Void)?
+    private var isActiveVoicePlayback = false
 
     override init(style: UITableViewCell.CellStyle, reuseIdentifier: String?) {
         super.init(style: style, reuseIdentifier: reuseIdentifier)
@@ -350,6 +357,29 @@ final class MessageBubbleCell: UITableViewCell {
         )
         documentHintLabel.isHidden = true
 
+        voicePlayButton.translatesAutoresizingMaskIntoConstraints = false
+        voicePlayButton.backgroundColor = ChitChatColors.chatDetailInput.withAlphaComponent(0.8)
+        voicePlayButton.tintColor = ChitChatColors.accent
+        voicePlayButton.layer.cornerRadius = 20
+        voicePlayButton.accessibilityLabel = "Play voice note"
+        voicePlayButton.isHidden = true
+        voicePlayButton.addTarget(self, action: #selector(voicePlayTapped), for: .touchUpInside)
+
+        voiceSlider.translatesAutoresizingMaskIntoConstraints = false
+        voiceSlider.minimumTrackTintColor = ChitChatColors.accent
+        voiceSlider.maximumTrackTintColor = ChitChatColors.textMuted.withAlphaComponent(0.35)
+        voiceSlider.thumbTintColor = ChitChatColors.accent
+        voiceSlider.accessibilityLabel = "Voice note progress"
+        voiceSlider.isHidden = true
+        voiceSlider.addTarget(self, action: #selector(voiceSliderChanged), for: .valueChanged)
+
+        voiceDurationLabel.translatesAutoresizingMaskIntoConstraints = false
+        voiceDurationLabel.font = UIFont.monospacedDigitSystemFont(ofSize: 10, weight: .medium)
+        voiceDurationLabel.textColor = ChitChatColors.textMuted
+        voiceDurationLabel.textAlignment = .right
+        voiceDurationLabel.numberOfLines = 1
+        voiceDurationLabel.isHidden = true
+
         timeLabel.translatesAutoresizingMaskIntoConstraints = false
         timeLabel.font = ChitChatTypography.chatDetailTime
         timeLabel.textAlignment = .right
@@ -393,6 +423,9 @@ final class MessageBubbleCell: UITableViewCell {
         bubbleView.addSubview(documentSizeLabel)
         bubbleView.addSubview(documentDivider)
         bubbleView.addSubview(documentHintLabel)
+        bubbleView.addSubview(voicePlayButton)
+        bubbleView.addSubview(voiceSlider)
+        bubbleView.addSubview(voiceDurationLabel)
         bubbleView.addSubview(timeLabel)
         bubbleView.addSubview(readView)
         contentView.addSubview(reactionPill)
@@ -461,6 +494,9 @@ final class MessageBubbleCell: UITableViewCell {
 
     override func prepareForReuse() {
         super.prepareForReuse()
+        if isActiveVoicePlayback {
+            voiceStopHandler?()
+        }
         resetForConfiguration()
     }
 
@@ -487,6 +523,10 @@ final class MessageBubbleCell: UITableViewCell {
         reactionLabel.text = nil
         sendStateButton.isHidden = true
         retryHandler = nil
+        voiceToggleHandler = nil
+        voiceSeekHandler = nil
+        voiceStopHandler = nil
+        isActiveVoicePlayback = false
         resetContentVisibility()
     }
 
@@ -497,7 +537,12 @@ final class MessageBubbleCell: UITableViewCell {
         currentUserId: String,
         status: MessageStatus,
         localSendState: MessageLocalSendState? = nil,
-        onRetry: (() -> Void)? = nil
+        localSendLabel: String? = nil,
+        onRetry: (() -> Void)? = nil,
+        voicePlaybackState: VoiceNotePlaybackState? = nil,
+        onVoiceToggle: (() -> Void)? = nil,
+        onVoiceSeek: ((TimeInterval) -> Void)? = nil,
+        onVoiceStop: (() -> Void)? = nil
     ) {
         resetForConfiguration()
         configureReplyPreview(replyPreview)
@@ -536,18 +581,35 @@ final class MessageBubbleCell: UITableViewCell {
             configureImage(message, attachment: attachment, isOutgoing: isOutgoing)
         } else if message.type == .document, let attachment = message.primaryAttachment {
             configureDocument(message, attachment: attachment, isOutgoing: isOutgoing)
+        } else if (message.type == .voice || message.type == .audio),
+                  let attachment = message.primaryAttachment {
+            configureVoice(
+                message,
+                attachment: attachment,
+                isOutgoing: isOutgoing,
+                playbackState: voicePlaybackState,
+                onToggle: onVoiceToggle,
+                onSeek: onVoiceSeek,
+                onStop: onVoiceStop
+            )
         } else {
             configureText(message, isOutgoing: isOutgoing)
         }
 
         configureReactions(message.reactions, currentUserId: currentUserId, isOutgoing: isOutgoing)
-        configureLocalSendState(localSendState, isOutgoing: isOutgoing, onRetry: onRetry)
+        configureLocalSendState(
+            localSendState,
+            label: localSendLabel,
+            isOutgoing: isOutgoing,
+            onRetry: onRetry
+        )
 
         accessibilityLabel = "\(isOutgoing ? "Sent" : "Received"): \(message.displayText)"
     }
 
     private func configureLocalSendState(
         _ state: MessageLocalSendState?,
+        label: String?,
         isOutgoing: Bool,
         onRetry: (() -> Void)?
     ) {
@@ -566,7 +628,10 @@ final class MessageBubbleCell: UITableViewCell {
             ),
             for: .normal
         )
-        sendStateButton.setTitle(state == .failed ? "  Not sent - Retry" : "  Sending...", for: .normal)
+        sendStateButton.setTitle(
+            state == .failed ? "  Not sent - Retry" : "  \(label ?? "Sending...")",
+            for: .normal
+        )
         let color = state == .failed ? UIColor(hex: "#FF8A8A") : ChitChatColors.textMuted
         sendStateButton.tintColor = color
         sendStateButton.setTitleColor(color, for: .normal)
@@ -783,6 +848,103 @@ final class MessageBubbleCell: UITableViewCell {
         NSLayoutConstraint.activate(activeLayoutConstraints)
     }
 
+    private func configureVoice(
+        _ message: Message,
+        attachment: MessageAttachment,
+        isOutgoing: Bool,
+        playbackState: VoiceNotePlaybackState?,
+        onToggle: (() -> Void)?,
+        onSeek: ((TimeInterval) -> Void)?,
+        onStop: (() -> Void)?
+    ) {
+        voicePlayButton.isHidden = false
+        voiceSlider.isHidden = false
+        voiceDurationLabel.isHidden = false
+        bubbleView.configure(isOutgoing: isOutgoing, radius: 20)
+        voiceToggleHandler = onToggle
+        voiceSeekHandler = onSeek
+        voiceStopHandler = onStop
+
+        let fallbackState = VoiceNotePlaybackState.idle(duration: attachment.duration ?? 0)
+        updateVoicePlayback(playbackState ?? fallbackState, messageID: message.id)
+
+        activeLayoutConstraints = [
+            bubbleView.widthAnchor.constraint(greaterThanOrEqualToConstant: 238),
+
+            contentTopConstraint(for: voicePlayButton, defaultConstant: 10),
+            voicePlayButton.leadingAnchor.constraint(equalTo: bubbleView.leadingAnchor, constant: 12),
+            voicePlayButton.widthAnchor.constraint(equalToConstant: 40),
+            voicePlayButton.heightAnchor.constraint(equalToConstant: 40),
+
+            voiceSlider.leadingAnchor.constraint(equalTo: voicePlayButton.trailingAnchor, constant: 8),
+            voiceSlider.trailingAnchor.constraint(equalTo: bubbleView.trailingAnchor, constant: -12),
+            voiceSlider.topAnchor.constraint(equalTo: voicePlayButton.topAnchor, constant: -1),
+            voiceSlider.heightAnchor.constraint(equalToConstant: 28),
+
+            voiceDurationLabel.topAnchor.constraint(equalTo: voiceSlider.bottomAnchor, constant: -2),
+            voiceDurationLabel.leadingAnchor.constraint(equalTo: voiceSlider.leadingAnchor),
+            voiceDurationLabel.trailingAnchor.constraint(equalTo: voiceSlider.trailingAnchor),
+            voiceDurationLabel.heightAnchor.constraint(equalToConstant: 13),
+
+            timeLabel.topAnchor.constraint(equalTo: voicePlayButton.bottomAnchor, constant: 5),
+            timeLabel.leadingAnchor.constraint(
+                greaterThanOrEqualTo: bubbleView.leadingAnchor,
+                constant: ChitChatSpacing.chatDetailBubbleHorizontal
+            ),
+            timeLabel.heightAnchor.constraint(equalToConstant: 13),
+            timeLabel.bottomAnchor.constraint(
+                equalTo: bubbleView.bottomAnchor,
+                constant: -ChitChatSpacing.chatDetailBubbleVertical
+            ),
+            readView.centerYAnchor.constraint(equalTo: timeLabel.centerYAnchor)
+        ]
+        NSLayoutConstraint.activate(activeLayoutConstraints)
+    }
+
+    func updateVoicePlayback(_ state: VoiceNotePlaybackState, messageID: String) {
+        let isCurrent = state.sourceID == messageID
+        isActiveVoicePlayback = isCurrent
+        let symbol = isCurrent && state.isPlaying ? "pause.fill" : "play.fill"
+        voicePlayButton.setImage(
+            UIImage(
+                systemName: symbol,
+                withConfiguration: UIImage.SymbolConfiguration(pointSize: 18, weight: .semibold)
+            ),
+            for: .normal
+        )
+        voicePlayButton.accessibilityLabel = isCurrent && state.isPlaying
+            ? "Pause voice note"
+            : "Play voice note"
+
+        let duration = max(state.duration, 0)
+        let elapsed = isCurrent ? min(max(state.elapsed, 0), duration) : 0
+        voiceSlider.minimumValue = 0
+        voiceSlider.maximumValue = Float(max(duration, 0.1))
+        voiceSlider.value = Float(elapsed)
+        voiceSlider.isEnabled = state.errorMessage == nil
+        voicePlayButton.isEnabled = state.errorMessage == nil
+        if let errorMessage = state.errorMessage, isCurrent {
+            voiceDurationLabel.text = errorMessage
+            voiceDurationLabel.textColor = UIColor(hex: "#FF9292")
+        } else {
+            voiceDurationLabel.text = "\(Self.voiceDuration(elapsed)) / \(Self.voiceDuration(duration))"
+            voiceDurationLabel.textColor = ChitChatColors.textMuted
+        }
+    }
+
+    @objc private func voicePlayTapped() {
+        voiceToggleHandler?()
+    }
+
+    @objc private func voiceSliderChanged() {
+        voiceSeekHandler?(TimeInterval(voiceSlider.value))
+    }
+
+    private static func voiceDuration(_ seconds: TimeInterval) -> String {
+        let value = max(0, Int(seconds.rounded(.down)))
+        return "\(value / 60):\(String(format: "%02d", value % 60))"
+    }
+
     private func documentTypeLabel(fileName: String?, mimeType: String?) -> String {
         let extensionValue = fileName.flatMap {
             URL(fileURLWithPath: $0).pathExtension.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -806,6 +968,9 @@ final class MessageBubbleCell: UITableViewCell {
             documentSizeLabel,
             documentDivider,
             documentHintLabel,
+            voicePlayButton,
+            voiceSlider,
+            voiceDurationLabel,
             replyPreviewView,
             reactionPill
         ].forEach { $0.isHidden = true }

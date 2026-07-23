@@ -133,6 +133,8 @@ final class UploadService {
             return "image/png"
         case "heic", "heif":
             return "image/heic"
+        case "m4a":
+            return "audio/mp4"
         default:
             break
         }

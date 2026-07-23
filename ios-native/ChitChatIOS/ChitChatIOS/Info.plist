@@ -57,7 +57,7 @@
     <key>NSContactsUsageDescription</key>
     <string>ChitChat reads contact names and phone numbers to find people who already use ChitChat.</string>
     <key>NSMicrophoneUsageDescription</key>
-    <string>ChitChat uses the microphone for voice and video calls.</string>
+    <string>ChitChat uses the microphone for voice notes and voice and video calls.</string>
     <key>NSPhotoLibraryUsageDescription</key>
     <string>ChitChat will use your photo library to select profile photos and media in later phases.</string>
     <key>NSLocalNetworkUsageDescription</key>

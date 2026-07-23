@@ -68,6 +68,8 @@
 		J10000000000000000000004 /* NotificationSettingsViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = J10000000000000000000024 /* NotificationSettingsViewController.swift */; };
 		K20000000000000000000001 /* DeviceContactsService.swift in Sources */ = {isa = PBXBuildFile; fileRef = K20000000000000000000021 /* DeviceContactsService.swift */; };
 		L30000000000000000000001 /* ActiveSessionsViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = L30000000000000000000021 /* ActiveSessionsViewController.swift */; };
+		M40000000000000000000001 /* VoiceNoteAudioController.swift in Sources */ = {isa = PBXBuildFile; fileRef = M40000000000000000000021 /* VoiceNoteAudioController.swift */; };
+		M40000000000000000000002 /* VoiceNoteComposerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = M40000000000000000000022 /* VoiceNoteComposerView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -132,6 +134,8 @@
 		J10000000000000000000024 /* NotificationSettingsViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationSettingsViewController.swift; sourceTree = "<group>"; };
 		K20000000000000000000021 /* DeviceContactsService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceContactsService.swift; sourceTree = "<group>"; };
 		L30000000000000000000021 /* ActiveSessionsViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActiveSessionsViewController.swift; sourceTree = "<group>"; };
+		M40000000000000000000021 /* VoiceNoteAudioController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceNoteAudioController.swift; sourceTree = "<group>"; };
+		M40000000000000000000022 /* VoiceNoteComposerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceNoteComposerView.swift; sourceTree = "<group>"; };
 		J10000000000000000000025 /* ChitChatIOS.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ChitChatIOS.entitlements; sourceTree = "<group>"; };
 		J10000000000000000000026 /* ChitChatIOS.Release.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ChitChatIOS.Release.entitlements; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -259,6 +263,8 @@
 				I90000000000000000000024 /* StatusViewerViewController.swift */,
 				J10000000000000000000024 /* NotificationSettingsViewController.swift */,
 				L30000000000000000000021 /* ActiveSessionsViewController.swift */,
+				M40000000000000000000021 /* VoiceNoteAudioController.swift */,
+				M40000000000000000000022 /* VoiceNoteComposerView.swift */,
 			);
 			path = Screens;
 			sourceTree = "<group>";
@@ -409,6 +415,8 @@
 				J10000000000000000000004 /* NotificationSettingsViewController.swift in Sources */,
 				K20000000000000000000001 /* DeviceContactsService.swift in Sources */,
 				L30000000000000000000001 /* ActiveSessionsViewController.swift in Sources */,
+				M40000000000000000000001 /* VoiceNoteAudioController.swift in Sources */,
+				M40000000000000000000002 /* VoiceNoteComposerView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

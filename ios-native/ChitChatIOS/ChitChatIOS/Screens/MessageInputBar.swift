@@ -7,6 +7,7 @@ final class MessageInputBar: UIView, UITextFieldDelegate {
 
     var onSend: ((String) -> Void)?
     var onAttach: (() -> Void)?
+    var onVoice: (() -> Void)?
     var onTextChanged: ((String) -> Void)?
 
     var currentText: String {
@@ -211,8 +212,12 @@ final class MessageInputBar: UIView, UITextFieldDelegate {
 
     @objc private func send() {
         let text = (textField.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, !isSending else { return }
-        onSend?(text)
+        guard !isSending else { return }
+        if text.isEmpty {
+            onVoice?()
+        } else {
+            onSend?(text)
+        }
     }
 
     @objc private func openAttachments() {
