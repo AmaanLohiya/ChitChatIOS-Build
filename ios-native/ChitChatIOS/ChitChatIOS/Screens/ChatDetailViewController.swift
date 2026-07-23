@@ -597,10 +597,15 @@ final class ChatDetailViewController: BaseViewController {
         presenceRefreshTask?.cancel()
         localTypingStopWorkItem?.cancel()
         remoteTypingWorkItems.values.forEach { $0.cancel() }
-        voiceNoteRecorder.cancel()
-        voiceNotePlayback.stop()
-        pendingSends.values.forEach {
-            VoiceNoteRecorder.removeTemporaryFile(at: $0.cleanupFileURL)
+        let voiceNoteRecorder = voiceNoteRecorder
+        let voiceNotePlayback = voiceNotePlayback
+        let cleanupFileURLs = pendingSends.values.compactMap(\.cleanupFileURL)
+        Task { @MainActor in
+            voiceNoteRecorder.cancel()
+            voiceNotePlayback.stop()
+            cleanupFileURLs.forEach {
+                VoiceNoteRecorder.removeTemporaryFile(at: $0)
+            }
         }
         pendingSends.removeAll()
         headerAvatar.cancelImageLoad()
