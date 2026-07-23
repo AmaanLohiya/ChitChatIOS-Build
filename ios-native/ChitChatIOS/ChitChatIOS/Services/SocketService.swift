@@ -337,14 +337,16 @@ final class SocketService {
         type: MessageType,
         text: String? = nil,
         attachments: [MessageAttachment]? = nil,
-        replyToMessageId: String? = nil
+        replyToMessageId: String? = nil,
+        clientSendId: String? = nil
     ) async throws -> Message {
         let payload = try Self.messagePayload(
             chatId: chatId,
             type: type,
             text: text,
             attachments: attachments,
-            replyToMessageId: replyToMessageId
+            replyToMessageId: replyToMessageId,
+            clientSendId: clientSendId
         )
 
         return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Message, Error>) in
@@ -374,7 +376,8 @@ final class SocketService {
         type: MessageType,
         text: String?,
         attachments: [MessageAttachment]?,
-        replyToMessageId: String?
+        replyToMessageId: String?,
+        clientSendId: String?
     ) throws -> [String: Any] {
         var payload: [String: Any] = [
             "chatId": chatId,
@@ -392,6 +395,10 @@ final class SocketService {
 
         if let replyToMessageId, !replyToMessageId.isEmpty {
             payload["replyToMessageId"] = replyToMessageId
+        }
+
+        if let clientSendId, !clientSendId.isEmpty {
+            payload["clientSendId"] = clientSendId
         }
 
         return payload

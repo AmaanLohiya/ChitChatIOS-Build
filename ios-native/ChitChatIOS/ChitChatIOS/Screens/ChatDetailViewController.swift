@@ -14,7 +14,7 @@ private enum MediaSendError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .selectedFileUnavailable:
-            return "Selected file could not be read."
+            return "The selected file is no longer available. Choose it again to send."
         case .fileCopyFailed:
             return "Selected file could not be copied."
         case .uploadFailed:
@@ -27,6 +27,29 @@ private enum MediaSendError: LocalizedError {
             return "Document could not be opened."
         }
     }
+}
+
+private enum PendingMessagePayload {
+    case ready(CreateMessageRequest)
+    case upload(
+        fileURL: URL,
+        fileName: String,
+        mimeType: String,
+        usage: UploadUsage,
+        resourceType: UploadResourceType,
+        messageType: MessageType,
+        text: String?,
+        localFileSize: Int?,
+        replyToMessageId: String?
+    )
+}
+
+private struct PendingMessageSend {
+    let clientSendId: String
+    var payload: PendingMessagePayload
+    var state: MessageLocalSendState
+    var attempts: Int
+    var isInFlight: Bool
 }
 
 private enum PickedMediaFile {
@@ -436,6 +459,9 @@ final class ChatDetailViewController: BaseViewController {
     private let onlineDot = UIView()
     private let statusLabel = UILabel()
     private let tableView = UITableView(frame: .zero, style: .plain)
+    private let olderMessagesHeader = UIView()
+    private let olderMessagesSpinner = UIActivityIndicatorView(style: .medium)
+    private let olderMessagesRetryButton = UIButton(type: .system)
     private let composerContextView = UIView()
     private let composerContextAccent = UIView()
     private let composerContextTitle = UILabel()
@@ -445,8 +471,10 @@ final class ChatDetailViewController: BaseViewController {
 
     private var stateOverlay: UIView?
     private var messages: [Message] = []
+    private var pendingSends: [String: PendingMessageSend] = [:]
     private var animatedMessageIDs = Set<String>()
     private var loadTask: Task<Void, Never>?
+    private var olderMessagesTask: Task<Void, Never>?
     private var sendTask: Task<Void, Never>?
     private var mediaTask: Task<Void, Never>?
     private var documentPreviewTask: Task<Void, Never>?
@@ -460,6 +488,9 @@ final class ChatDetailViewController: BaseViewController {
     private var editingMessageID: String?
     private var composerDraftBeforeEdit: String?
     private var hasLoaded = false
+    private var hasPositionedInitialMessages = false
+    private var nextMessageCursor: String?
+    private var hasMoreMessages = false
     private var socketObservers: [NSObjectProtocol] = []
     private var readInFlightMessageIDs = Set<String>()
     private var deletedForMeMessageIDs = Set<String>()
@@ -515,6 +546,15 @@ final class ChatDetailViewController: BaseViewController {
         markVisibleIncomingMessagesRead()
     }
 
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        guard olderMessagesHeader.frame.width != tableView.bounds.width else { return }
+        var frame = olderMessagesHeader.frame
+        frame.size.width = tableView.bounds.width
+        olderMessagesHeader.frame = frame
+        tableView.tableHeaderView = olderMessagesHeader
+    }
+
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
         isViewVisible = false
@@ -531,6 +571,7 @@ final class ChatDetailViewController: BaseViewController {
 
     deinit {
         loadTask?.cancel()
+        olderMessagesTask?.cancel()
         sendTask?.cancel()
         mediaTask?.cancel()
         documentPreviewTask?.cancel()
@@ -539,6 +580,7 @@ final class ChatDetailViewController: BaseViewController {
         presenceRefreshTask?.cancel()
         localTypingStopWorkItem?.cancel()
         remoteTypingWorkItems.values.forEach { $0.cancel() }
+        pendingSends.removeAll()
         headerAvatar.cancelImageLoad()
         socketObservers.forEach { NotificationCenter.default.removeObserver($0) }
         SocketService.shared.leaveChat(chat.id)
@@ -801,6 +843,7 @@ final class ChatDetailViewController: BaseViewController {
             MessageBubbleCell.self,
             forCellReuseIdentifier: MessageBubbleCell.reuseIdentifier
         )
+        configureOlderMessagesHeader()
         let longPress = UILongPressGestureRecognizer(
             target: self,
             action: #selector(handleMessageLongPress(_:))
@@ -819,6 +862,49 @@ final class ChatDetailViewController: BaseViewController {
         tableView.refreshControl = refresh
 
         view.addSubview(tableView)
+    }
+
+    private func configureOlderMessagesHeader() {
+        olderMessagesHeader.backgroundColor = .clear
+        olderMessagesSpinner.translatesAutoresizingMaskIntoConstraints = false
+        olderMessagesSpinner.color = ChitChatColors.accent
+        olderMessagesSpinner.hidesWhenStopped = true
+
+        olderMessagesRetryButton.translatesAutoresizingMaskIntoConstraints = false
+        olderMessagesRetryButton.setTitle("Retry older messages", for: .normal)
+        olderMessagesRetryButton.setTitleColor(ChitChatColors.accent, for: .normal)
+        olderMessagesRetryButton.titleLabel?.font = UIFont.systemFont(ofSize: 11, weight: .semibold)
+        olderMessagesRetryButton.accessibilityLabel = "Retry loading older messages"
+        olderMessagesRetryButton.addTarget(
+            self,
+            action: #selector(retryOlderMessages),
+            for: .touchUpInside
+        )
+        olderMessagesRetryButton.isHidden = true
+
+        olderMessagesHeader.addSubview(olderMessagesSpinner)
+        olderMessagesHeader.addSubview(olderMessagesRetryButton)
+        NSLayoutConstraint.activate([
+            olderMessagesSpinner.centerXAnchor.constraint(equalTo: olderMessagesHeader.centerXAnchor),
+            olderMessagesSpinner.centerYAnchor.constraint(equalTo: olderMessagesHeader.centerYAnchor),
+            olderMessagesRetryButton.centerXAnchor.constraint(equalTo: olderMessagesHeader.centerXAnchor),
+            olderMessagesRetryButton.centerYAnchor.constraint(equalTo: olderMessagesHeader.centerYAnchor),
+            olderMessagesRetryButton.heightAnchor.constraint(equalToConstant: 28)
+        ])
+        updateOlderMessagesHeader(isLoading: false, showsRetry: false)
+    }
+
+    private func updateOlderMessagesHeader(isLoading: Bool, showsRetry: Bool) {
+        let shouldShow = hasMoreMessages || isLoading || showsRetry
+        olderMessagesHeader.frame = CGRect(
+            x: 0,
+            y: 0,
+            width: tableView.bounds.width,
+            height: shouldShow ? 32 : 0.01
+        )
+        tableView.tableHeaderView = olderMessagesHeader
+        isLoading ? olderMessagesSpinner.startAnimating() : olderMessagesSpinner.stopAnimating()
+        olderMessagesRetryButton.isHidden = !showsRetry
     }
 
     private func configureInputBar() {
@@ -924,7 +1010,7 @@ final class ChatDetailViewController: BaseViewController {
     }
 
     private func loadMessages() {
-        guard loadTask == nil else { return }
+        guard loadTask == nil, olderMessagesTask == nil else { return }
         if !hasLoaded {
             showLoadingState()
         }
@@ -935,9 +1021,32 @@ final class ChatDetailViewController: BaseViewController {
                 let page = try await messageService.listMessages(chatId: chat.id)
                 guard !Task.isCancelled else { return }
                 await MainActor.run {
-                    self.messages = page.values
-                        .filter { !$0.isDeletedForMe }
-                        .sorted(by: self.sortMessages)
+                    let wasLoaded = self.hasLoaded
+                    let shouldFollow = !wasLoaded || self.isNearBottom
+                    if wasLoaded {
+                        page.values.forEach { self.mergeAuthoritativeMessage($0) }
+                    } else {
+                        let localPendingMessages = self.messages.filter {
+                            guard let clientSendId = $0.clientSendId else { return false }
+                            return self.pendingSends[clientSendId] != nil
+                        }
+                        page.values.forEach { message in
+                            if let clientSendId = message.clientSendId {
+                                self.pendingSends.removeValue(forKey: clientSendId)
+                            }
+                        }
+                        self.messages = page.values.filter { !$0.isDeletedForMe }
+                        localPendingMessages.forEach { pending in
+                            guard !self.messages.contains(where: {
+                                $0.clientSendId == pending.clientSendId || $0.id == pending.id
+                            }) else { return }
+                            self.messages.append(pending)
+                        }
+                        self.nextMessageCursor = page.nextCursor
+                        self.hasMoreMessages = page.hasMore
+                    }
+                    self.messages.sort(by: self.sortMessages)
+                    self.updateOlderMessagesHeader(isLoading: false, showsRetry: false)
                     self.hasLoaded = true
                     self.tableView.reloadData()
                     self.tableView.refreshControl?.endRefreshing()
@@ -950,7 +1059,9 @@ final class ChatDetailViewController: BaseViewController {
                         )
                     } else {
                         self.hideStateOverlay()
-                        self.scrollToBottom(animated: false)
+                        if shouldFollow {
+                            self.scrollToBottom(animated: false)
+                        }
                         DispatchQueue.main.async { [weak self] in
                             self?.markVisibleIncomingMessagesRead()
                         }
@@ -1115,38 +1226,181 @@ final class ChatDetailViewController: BaseViewController {
             return
         }
 
-        let replyMessageID = replyToMessageID
-        inputBar.setSending(true)
+        let clientSendId = "ios-\(UUID().uuidString.lowercased())"
+        let createdAt = ISO8601DateFormatter().string(from: Date())
+        let request = CreateMessageRequest(
+            type: .text,
+            text: text,
+            attachments: nil,
+            replyToMessageId: replyToMessageID,
+            clientSendId: clientSendId
+        )
+        let localMessage = Message.pending(
+            chatId: chat.id,
+            senderId: currentUser.id,
+            clientSendId: clientSendId,
+            type: .text,
+            text: text,
+            attachments: [],
+            replyToMessageId: replyToMessageID,
+            createdAt: createdAt
+        )
+        enqueuePendingMessage(
+            localMessage,
+            payload: .ready(request),
+            usesMediaTask: false
+        )
+        inputBar.clearText()
+        clearComposerContextState(restoreDraft: false)
+    }
 
-        sendTask = Task { [weak self] in
+    private func enqueuePendingMessage(
+        _ message: Message,
+        payload: PendingMessagePayload,
+        usesMediaTask: Bool
+    ) {
+        guard let clientSendId = message.clientSendId else { return }
+        pendingSends[clientSendId] = PendingMessageSend(
+            clientSendId: clientSendId,
+            payload: payload,
+            state: .sending,
+            attempts: 0,
+            isInFlight: false
+        )
+        messages.append(message)
+        messages.sort(by: sortMessages)
+        hideStateOverlay()
+        tableView.reloadData()
+        scrollToBottom(animated: true)
+        startPendingSend(clientSendId: clientSendId, usesMediaTask: usesMediaTask)
+    }
+
+    private func startPendingSend(clientSendId: String, usesMediaTask: Bool) {
+        guard var pending = pendingSends[clientSendId], !pending.isInFlight else { return }
+        pending.isInFlight = true
+        pending.attempts += 1
+        pending.state = .sending
+        pendingSends[clientSendId] = pending
+        inputBar.setSending(true)
+        reloadPendingMessage(clientSendId)
+
+        let task = Task { [weak self] in
             guard let self else { return }
             do {
-                let created = try await self.createMessage(
-                    CreateMessageRequest(
-                        type: .text,
-                        text: text,
-                        attachments: nil,
-                        replyToMessageId: replyMessageID
-                    )
-                )
+                let created = try await self.performPendingSend(clientSendId: clientSendId)
                 guard !Task.isCancelled else { return }
                 await MainActor.run {
                     self.mergeCreatedMessage(created)
-                    self.inputBar.clearText()
-                    self.clearComposerContextState(restoreDraft: false)
-                    self.inputBar.setSending(false)
-                    self.sendTask = nil
+                    self.finishPendingTask(usesMediaTask: usesMediaTask)
                 }
             } catch {
                 guard !Task.isCancelled else { return }
                 await MainActor.run {
-                    self.inputBar.restoreText(text)
-                    self.inputBar.setSending(false)
-                    self.sendTask = nil
+                    guard var failed = self.pendingSends[clientSendId] else {
+                        self.finishPendingTask(usesMediaTask: usesMediaTask)
+                        return
+                    }
+                    failed.isInFlight = false
+                    failed.state = .failed
+                    self.pendingSends[clientSendId] = failed
+                    self.reloadPendingMessage(clientSendId)
+                    self.finishPendingTask(usesMediaTask: usesMediaTask)
                     self.showAlert(message: error.localizedDescription)
                 }
             }
         }
+        if usesMediaTask {
+            mediaTask = task
+        } else {
+            sendTask = task
+        }
+    }
+
+    private func performPendingSend(clientSendId: String) async throws -> Message {
+        guard let pending = pendingSends[clientSendId] else {
+            throw MediaSendError.sendFailed
+        }
+
+        let request: CreateMessageRequest
+        switch pending.payload {
+        case .ready(let preparedRequest):
+            request = preparedRequest
+        case let .upload(
+            fileURL,
+            fileName,
+            mimeType,
+            usage,
+            resourceType,
+            messageType,
+            text,
+            localFileSize,
+            replyToMessageId
+        ):
+            if pending.attempts > 1,
+               !FileManager.default.fileExists(atPath: fileURL.path) {
+                throw MediaSendError.selectedFileUnavailable
+            }
+            let upload: Upload
+            do {
+                upload = try await uploadService.uploadLocalFile(
+                    fileURL: fileURL,
+                    fileName: fileName,
+                    mimeType: mimeType,
+                    usage: usage,
+                    resourceType: resourceType
+                )
+            } catch {
+                throw MediaSendError.uploadFailed
+            }
+            let attachment = upload.attachment.resolvingSize(localFileSize)
+            request = CreateMessageRequest(
+                type: messageType,
+                text: text,
+                attachments: [attachment],
+                replyToMessageId: replyToMessageId,
+                clientSendId: clientSendId
+            )
+            await MainActor.run {
+                guard var latest = self.pendingSends[clientSendId] else { return }
+                latest.payload = .ready(request)
+                self.pendingSends[clientSendId] = latest
+            }
+        }
+
+        do {
+            return try await createMessage(request)
+        } catch {
+            throw MediaSendError.sendFailed
+        }
+    }
+
+    private func finishPendingTask(usesMediaTask: Bool) {
+        inputBar.setSending(false)
+        if usesMediaTask {
+            mediaTask = nil
+        } else {
+            sendTask = nil
+        }
+    }
+
+    private func reloadPendingMessage(_ clientSendId: String) {
+        guard let index = messages.firstIndex(where: { $0.clientSendId == clientSendId }) else {
+            return
+        }
+        tableView.reloadRows(at: [IndexPath(row: index, section: 0)], with: .none)
+    }
+
+    private func retryPendingMessage(_ clientSendId: String) {
+        guard let pending = pendingSends[clientSendId], pending.state == .failed else { return }
+        let usesMediaTask: Bool
+        switch pending.payload {
+        case .ready(let request):
+            usesMediaTask = request.type == .image || request.type == .document
+        case .upload:
+            usesMediaTask = true
+        }
+        guard usesMediaTask ? mediaTask == nil : sendTask == nil else { return }
+        startPendingSend(clientSendId: clientSendId, usesMediaTask: usesMediaTask)
     }
 
     private func sendEditedMessage(messageID: String, text: String) {
@@ -1217,7 +1471,8 @@ final class ChatDetailViewController: BaseViewController {
                     type: request.type,
                     text: request.text,
                     attachments: request.attachments,
-                    replyToMessageId: request.replyToMessageId
+                    replyToMessageId: request.replyToMessageId,
+                    clientSendId: request.clientSendId
                 )
             } catch {
                 return try await messageService.sendMessage(chatId: chat.id, request: request)
@@ -1228,15 +1483,7 @@ final class ChatDetailViewController: BaseViewController {
     }
 
     private func mergeCreatedMessage(_ created: Message) {
-        let createdID = normalizedMessageID(created.id)
-        guard !createdID.isEmpty else { return }
-        if let index = messages.firstIndex(where: { normalizedMessageID($0.id) == createdID }) {
-            guard messages[index] != created else { return }
-            messages[index] = created
-        } else {
-            messages.append(created)
-            messages.sort(by: sortMessages)
-        }
+        guard mergeAuthoritativeMessage(created) else { return }
         hideStateOverlay()
         tableView.reloadData()
         scrollToBottom(animated: true)
@@ -1358,57 +1605,46 @@ final class ChatDetailViewController: BaseViewController {
         text: String?
     ) {
         guard mediaTask == nil, sendTask == nil else { return }
-        inputBar.setSending(true)
         let localFileSize = PickedMediaFile.fileSize(at: fileURL)
         let replyMessageID = replyToMessageID
-
-        mediaTask = Task { [weak self] in
-            guard let self else { return }
-            do {
-                let upload: Upload
-                do {
-                    upload = try await uploadService.uploadLocalFile(
-                        fileURL: fileURL,
-                        fileName: fileName,
-                        mimeType: mimeType,
-                        usage: usage,
-                        resourceType: resourceType
-                    )
-                } catch {
-                    throw MediaSendError.uploadFailed
-                }
-
-                let attachment = upload.attachment.resolvingSize(localFileSize)
-                let created: Message
-                do {
-                    created = try await self.createMessage(
-                        CreateMessageRequest(
-                            type: messageType,
-                            text: text,
-                            attachments: [attachment],
-                            replyToMessageId: replyMessageID
-                        )
-                    )
-                } catch {
-                    throw MediaSendError.sendFailed
-                }
-
-                guard !Task.isCancelled else { return }
-                await MainActor.run {
-                    self.mergeCreatedMessage(created)
-                    self.clearComposerContextState(restoreDraft: false)
-                    self.inputBar.setSending(false)
-                    self.mediaTask = nil
-                }
-            } catch {
-                guard !Task.isCancelled else { return }
-                await MainActor.run {
-                    self.inputBar.setSending(false)
-                    self.mediaTask = nil
-                    self.showAlert(message: error.localizedDescription)
-                }
-            }
-        }
+        let clientSendId = "ios-\(UUID().uuidString.lowercased())"
+        let createdAt = ISO8601DateFormatter().string(from: Date())
+        let localAttachment = MessageAttachment(
+            url: fileURL.absoluteString,
+            mimeType: mimeType,
+            fileName: fileName,
+            size: localFileSize,
+            duration: nil,
+            width: nil,
+            height: nil,
+            thumbnailUrl: nil
+        )
+        let localMessage = Message.pending(
+            chatId: chat.id,
+            senderId: currentUser.id,
+            clientSendId: clientSendId,
+            type: messageType,
+            text: text,
+            attachments: [localAttachment],
+            replyToMessageId: replyMessageID,
+            createdAt: createdAt
+        )
+        enqueuePendingMessage(
+            localMessage,
+            payload: .upload(
+                fileURL: fileURL,
+                fileName: fileName,
+                mimeType: mimeType,
+                usage: usage,
+                resourceType: resourceType,
+                messageType: messageType,
+                text: text,
+                localFileSize: localFileSize,
+                replyToMessageId: replyMessageID
+            ),
+            usesMediaTask: true
+        )
+        clearComposerContextState(restoreDraft: false)
     }
 
     private func openMediaMessage(_ message: Message) {
@@ -1546,7 +1782,11 @@ final class ChatDetailViewController: BaseViewController {
         else { return }
 
         let message = messages[indexPath.row]
-        guard !message.isDeletedForEveryone, !message.isDeletedForMe else { return }
+        guard
+            !message.isDeletedForEveryone,
+            !message.isDeletedForMe,
+            message.clientSendId.flatMap({ pendingSends[$0] }) == nil
+        else { return }
         let anchorRect = tableView.rectForRow(at: indexPath)
         presentMessageActions(messageID: message.id, anchorRect: anchorRect)
     }
@@ -2064,6 +2304,85 @@ final class ChatDetailViewController: BaseViewController {
         }
     }
 
+    private func loadOlderMessages() {
+        guard
+            hasLoaded,
+            hasMoreMessages,
+            let cursor = nextMessageCursor,
+            !cursor.isEmpty,
+            loadTask == nil,
+            olderMessagesTask == nil
+        else { return }
+
+        updateOlderMessagesHeader(isLoading: true, showsRetry: false)
+
+        olderMessagesTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                let page = try await messageService.listMessages(
+                    chatId: chat.id,
+                    cursor: cursor
+                )
+                guard !Task.isCancelled else { return }
+                await MainActor.run {
+                    let previousContentHeight = self.tableView.contentSize.height
+                    let previousOffset = self.tableView.contentOffset
+                    page.values.forEach { self.mergeAuthoritativeMessage($0) }
+                    self.nextMessageCursor = page.nextCursor
+                    self.hasMoreMessages = page.hasMore
+                    self.updateOlderMessagesHeader(isLoading: false, showsRetry: false)
+                    self.tableView.reloadData()
+                    self.tableView.layoutIfNeeded()
+                    let heightDelta = self.tableView.contentSize.height - previousContentHeight
+                    let minimumOffset = -self.tableView.adjustedContentInset.top
+                    self.tableView.setContentOffset(
+                        CGPoint(
+                            x: previousOffset.x,
+                            y: max(minimumOffset, previousOffset.y + heightDelta)
+                        ),
+                        animated: false
+                    )
+                    self.olderMessagesTask = nil
+                }
+            } catch {
+                guard !Task.isCancelled else { return }
+                await MainActor.run {
+                    self.updateOlderMessagesHeader(isLoading: false, showsRetry: true)
+                    self.olderMessagesTask = nil
+                }
+            }
+        }
+    }
+
+    @discardableResult
+    private func mergeAuthoritativeMessage(_ message: Message) -> Bool {
+        let messageID = normalizedMessageID(message.id)
+        guard !messageID.isEmpty else { return false }
+
+        if let clientSendId = message.clientSendId, !clientSendId.isEmpty {
+            pendingSends.removeValue(forKey: clientSendId)
+            messages.removeAll {
+                $0.clientSendId == clientSendId && normalizedMessageID($0.id) != messageID
+            }
+        }
+        if message.isDeletedForMe {
+            deletedForMeMessageIDs.insert(messageID)
+            let previousCount = messages.count
+            messages.removeAll { normalizedMessageID($0.id) == messageID }
+            return messages.count != previousCount
+        }
+        if deletedForMeMessageIDs.contains(messageID) { return false }
+
+        if let index = messages.firstIndex(where: { normalizedMessageID($0.id) == messageID }) {
+            guard messages[index] != message else { return false }
+            messages[index] = message
+        } else {
+            messages.append(message)
+        }
+        messages.sort(by: sortMessages)
+        return true
+    }
+
     private func acknowledgeRead(messageID: String) async throws -> MarkReadResponse {
         if SocketService.shared.isConnected {
             do {
@@ -2178,26 +2497,7 @@ final class ChatDetailViewController: BaseViewController {
         }
 
         let shouldFollow = isNearBottom || event.message.senderId == currentUser.id
-        let eventMessageID = normalizedMessageID(event.message.id)
-        guard !eventMessageID.isEmpty else { return }
-        if event.message.isDeletedForMe {
-            deletedForMeMessageIDs.insert(eventMessageID)
-        }
-        if deletedForMeMessageIDs.contains(eventMessageID) {
-            messages.removeAll { normalizedMessageID($0.id) == eventMessageID }
-            tableView.reloadData()
-            return
-        }
-        if let index = messages.firstIndex(where: {
-            normalizedMessageID($0.id) == eventMessageID
-        }) {
-            guard messages[index] != event.message else { return }
-            messages[index] = event.message
-        } else {
-            messages.append(event.message)
-        }
-
-        messages.sort(by: sortMessages)
+        guard mergeAuthoritativeMessage(event.message) else { return }
         hasLoaded = true
         tableView.reloadData()
         if messages.isEmpty {
@@ -2226,7 +2526,8 @@ final class ChatDetailViewController: BaseViewController {
     private func sortMessages(_ left: Message, _ right: Message) -> Bool {
         let leftDate = ChitChatDateFormatter.date(from: left.createdAt) ?? .distantPast
         let rightDate = ChitChatDateFormatter.date(from: right.createdAt) ?? .distantPast
-        return leftDate < rightDate
+        if leftDate != rightDate { return leftDate < rightDate }
+        return normalizedMessageID(left.id) < normalizedMessageID(right.id)
     }
 
     private func scrollToBottom(animated: Bool) {
@@ -2237,6 +2538,7 @@ final class ChatDetailViewController: BaseViewController {
                 at: .bottom,
                 animated: animated
             )
+            self.hasPositionedInitialMessages = true
         }
     }
 
@@ -2352,6 +2654,10 @@ final class ChatDetailViewController: BaseViewController {
         loadMessages()
     }
 
+    @objc private func retryOlderMessages() {
+        loadOlderMessages()
+    }
+
     @objc private func goBack() {
         navigationController?.popViewController(animated: true)
     }
@@ -2402,12 +2708,18 @@ extension ChatDetailViewController: UITableViewDataSource, UITableViewDelegate {
             return UITableViewCell()
         }
         let message = messages[indexPath.row]
+        let localSendState = message.clientSendId.flatMap { pendingSends[$0]?.state }
         cell.configure(
             message: message,
             isOutgoing: message.senderId == currentUser.id,
             replyPreview: replyPreview(for: message),
             currentUserId: currentUser.id,
-            status: message.status(activeParticipantIDs: activeParticipantIDs)
+            status: message.status(activeParticipantIDs: activeParticipantIDs),
+            localSendState: localSendState,
+            onRetry: { [weak self] in
+                guard let clientSendId = message.clientSendId else { return }
+                self?.retryPendingMessage(clientSendId)
+            }
         )
         return cell
     }
@@ -2429,6 +2741,14 @@ extension ChatDetailViewController: UITableViewDataSource, UITableViewDelegate {
         ) {
             cell.alpha = 1
             cell.transform = .identity
+        }
+    }
+
+    func scrollViewDidScroll(_ scrollView: UIScrollView) {
+        guard scrollView === tableView, hasPositionedInitialMessages else { return }
+        let topThreshold = -scrollView.adjustedContentInset.top + 80
+        if scrollView.contentOffset.y <= topThreshold {
+            loadOlderMessages()
         }
     }
 

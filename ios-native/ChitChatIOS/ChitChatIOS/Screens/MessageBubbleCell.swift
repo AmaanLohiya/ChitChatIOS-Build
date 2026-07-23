@@ -238,6 +238,7 @@ final class MessageBubbleCell: UITableViewCell {
     private let readView = MessageReadView()
     private let reactionPill = UIView()
     private let reactionLabel = UILabel()
+    private let sendStateButton = UIButton(type: .system)
 
     private var leadingConstraint: NSLayoutConstraint?
     private var trailingConstraint: NSLayoutConstraint?
@@ -246,8 +247,10 @@ final class MessageBubbleCell: UITableViewCell {
     private var outgoingTimeTrailing: NSLayoutConstraint?
     private var activeLayoutConstraints: [NSLayoutConstraint] = []
     private var reactionLayoutConstraints: [NSLayoutConstraint] = []
+    private var sendStateLayoutConstraints: [NSLayoutConstraint] = []
     private var imageTask: URLSessionDataTask?
     private var representedImageURL: String?
+    private var retryHandler: (() -> Void)?
 
     override init(style: UITableViewCell.CellStyle, reuseIdentifier: String?) {
         super.init(style: style, reuseIdentifier: reuseIdentifier)
@@ -367,6 +370,15 @@ final class MessageBubbleCell: UITableViewCell {
         reactionLabel.numberOfLines = 1
         reactionLabel.lineBreakMode = .byTruncatingTail
 
+        sendStateButton.translatesAutoresizingMaskIntoConstraints = false
+        sendStateButton.titleLabel?.font = UIFont.systemFont(ofSize: 11, weight: .semibold)
+        sendStateButton.tintColor = ChitChatColors.textMuted
+        sendStateButton.setTitleColor(ChitChatColors.textMuted, for: .normal)
+        sendStateButton.contentHorizontalAlignment = .trailing
+        sendStateButton.semanticContentAttribute = .forceLeftToRight
+        sendStateButton.isHidden = true
+        sendStateButton.addTarget(self, action: #selector(retryTapped), for: .touchUpInside)
+
         contentView.addSubview(bubbleView)
         bubbleView.addSubview(replyPreviewView)
         replyPreviewView.addSubview(replyAccentView)
@@ -385,6 +397,7 @@ final class MessageBubbleCell: UITableViewCell {
         bubbleView.addSubview(readView)
         contentView.addSubview(reactionPill)
         reactionPill.addSubview(reactionLabel)
+        contentView.addSubview(sendStateButton)
 
         incomingTimeTrailing = timeLabel.trailingAnchor.constraint(
             equalTo: bubbleView.trailingAnchor,
@@ -464,12 +477,16 @@ final class MessageBubbleCell: UITableViewCell {
         activeLayoutConstraints.removeAll()
         NSLayoutConstraint.deactivate(reactionLayoutConstraints)
         reactionLayoutConstraints.removeAll()
+        NSLayoutConstraint.deactivate(sendStateLayoutConstraints)
+        sendStateLayoutConstraints.removeAll()
         bubbleBottomConstraint?.isActive = true
         leadingConstraint = nil
         trailingConstraint = nil
         replySenderLabel.text = nil
         replySummaryLabel.text = nil
         reactionLabel.text = nil
+        sendStateButton.isHidden = true
+        retryHandler = nil
         resetContentVisibility()
     }
 
@@ -478,7 +495,9 @@ final class MessageBubbleCell: UITableViewCell {
         isOutgoing: Bool,
         replyPreview: MessageReplyPreview?,
         currentUserId: String,
-        status: MessageStatus
+        status: MessageStatus,
+        localSendState: MessageLocalSendState? = nil,
+        onRetry: (() -> Void)? = nil
     ) {
         resetForConfiguration()
         configureReplyPreview(replyPreview)
@@ -522,8 +541,53 @@ final class MessageBubbleCell: UITableViewCell {
         }
 
         configureReactions(message.reactions, currentUserId: currentUserId, isOutgoing: isOutgoing)
+        configureLocalSendState(localSendState, isOutgoing: isOutgoing, onRetry: onRetry)
 
         accessibilityLabel = "\(isOutgoing ? "Sent" : "Received"): \(message.displayText)"
+    }
+
+    private func configureLocalSendState(
+        _ state: MessageLocalSendState?,
+        isOutgoing: Bool,
+        onRetry: (() -> Void)?
+    ) {
+        guard isOutgoing, let state else { return }
+        bubbleBottomConstraint?.isActive = false
+        readView.isHidden = true
+        retryHandler = state == .failed ? onRetry : nil
+        sendStateButton.isEnabled = state == .failed
+        sendStateButton.isHidden = false
+
+        let symbolName = state == .failed ? "exclamationmark.circle" : "clock"
+        sendStateButton.setImage(
+            UIImage(
+                systemName: symbolName,
+                withConfiguration: UIImage.SymbolConfiguration(pointSize: 11, weight: .semibold)
+            ),
+            for: .normal
+        )
+        sendStateButton.setTitle(state == .failed ? "  Not sent - Retry" : "  Sending...", for: .normal)
+        let color = state == .failed ? UIColor(hex: "#FF8A8A") : ChitChatColors.textMuted
+        sendStateButton.tintColor = color
+        sendStateButton.setTitleColor(color, for: .normal)
+        sendStateButton.accessibilityLabel = state == .failed
+            ? "Message not sent. Retry"
+            : "Message sending"
+
+        sendStateLayoutConstraints = [
+            sendStateButton.topAnchor.constraint(equalTo: bubbleView.bottomAnchor, constant: 1),
+            sendStateButton.trailingAnchor.constraint(equalTo: bubbleView.trailingAnchor),
+            sendStateButton.heightAnchor.constraint(equalToConstant: 24),
+            sendStateButton.bottomAnchor.constraint(
+                equalTo: contentView.bottomAnchor,
+                constant: -ChitChatSpacing.chatDetailRowBottom
+            )
+        ]
+        NSLayoutConstraint.activate(sendStateLayoutConstraints)
+    }
+
+    @objc private func retryTapped() {
+        retryHandler?()
     }
 
     private func configureReplyPreview(_ preview: MessageReplyPreview?) {
@@ -777,6 +841,12 @@ final class MessageBubbleCell: UITableViewCell {
             return
         }
         guard let url = URL(string: urlString) else { return }
+        if url.isFileURL {
+            guard let image = UIImage(contentsOfFile: url.path) else { return }
+            Self.imageCache.setObject(image, forKey: urlString as NSString)
+            mediaImageView.image = image
+            return
+        }
         imageTask = URLSession.shared.dataTask(with: url) { [weak self] data, _, _ in
             guard let data, let image = UIImage(data: data) else { return }
             Self.imageCache.setObject(image, forKey: urlString as NSString)

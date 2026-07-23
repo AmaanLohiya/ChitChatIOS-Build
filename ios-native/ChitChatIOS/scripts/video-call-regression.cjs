@@ -11,8 +11,6 @@ const publicVideoBaseline = 'ce83bedb4365805f34ed2714211e1962df3698b2';
 const read = (relativePath) => fs.readFileSync(path.join(nativeRoot, relativePath), 'utf8');
 const readRepo = (relativePath) => fs.readFileSync(path.join(repoRoot, relativePath), 'utf8');
 const normalize = (value) => value.replace(/\r\n/g, '\n');
-const withoutUnreadMarkRead = (value) =>
-  value.replace(/    func markRead\([\s\S]*?(?=    func sendText\()/, '');
 const fileAtRef = (ref, relativePath) =>
   cp.execFileSync('git', ['show', `${ref}:${relativePath}`], {
     cwd: repoRoot,
@@ -207,11 +205,16 @@ test('incoming accept-decline layout remains unchanged from the video baseline',
 });
 
 test('WebRTC media and signaling services remain unchanged from the video baseline', () => {
+  const baselineSocket = nativeFileAtVideoBaseline('Services/SocketService.swift');
+  const signalingRanges = [
+    ['    func sendCallOffer(', '    func sendMessage('],
+    ['    private func sendCallTerminalEvent(', '    private func registerHandlers('],
+    ['    private func registerCallHandlers(', '    private func joinDesiredChat(']
+  ];
   assert.equal(normalize(service), normalize(nativeFileAtVideoBaseline('Services/VoiceCallService.swift')));
-  assert.equal(
-    normalize(withoutUnreadMarkRead(socket)),
-    normalize(withoutUnreadMarkRead(nativeFileAtVideoBaseline('Services/SocketService.swift')))
-  );
+  for (const [start, end] of signalingRanges) {
+    assert.equal(normalize(section(socket, start, end)), normalize(section(baselineSocket, start, end)));
+  }
 });
 
 test('video permissions describe current behavior', () => {

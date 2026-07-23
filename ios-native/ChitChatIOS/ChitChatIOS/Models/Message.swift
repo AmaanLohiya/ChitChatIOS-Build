@@ -20,6 +20,11 @@ enum MessageStatus: Equatable {
     case read
 }
 
+enum MessageLocalSendState: Equatable {
+    case sending
+    case failed
+}
+
 struct MessageSender: Equatable {
     let id: String
     let name: String
@@ -145,6 +150,7 @@ struct Message: Codable, Equatable {
     let id: String
     let chatId: String
     let senderId: String
+    let clientSendId: String?
     let type: MessageType
     let text: String
     let attachments: [MessageAttachment]
@@ -159,6 +165,38 @@ struct Message: Codable, Equatable {
     let updatedAt: String
     let isDeletedForEveryone: Bool
     let isDeletedForMe: Bool
+
+    static func pending(
+        chatId: String,
+        senderId: String,
+        clientSendId: String,
+        type: MessageType,
+        text: String?,
+        attachments: [MessageAttachment],
+        replyToMessageId: String?,
+        createdAt: String
+    ) -> Message {
+        Message(
+            id: "local-\(clientSendId)",
+            chatId: chatId,
+            senderId: senderId,
+            clientSendId: clientSendId,
+            type: type,
+            text: text ?? "",
+            attachments: attachments,
+            replyToMessageId: replyToMessageId,
+            forwardedFromMessageId: nil,
+            deliveredTo: [],
+            readBy: [],
+            reactions: [],
+            editedAt: nil,
+            deletedForEveryoneAt: nil,
+            createdAt: createdAt,
+            updatedAt: createdAt,
+            isDeletedForEveryone: false,
+            isDeletedForMe: false
+        )
+    }
 
     func status(activeParticipantIDs: [String]) -> MessageStatus {
         let recipientIDs = Set(activeParticipantIDs).filter { $0 != senderId }
@@ -201,6 +239,7 @@ struct CreateTextMessageRequest: Encodable {
 }
 
 struct CreateMessageRequest: Encodable {
+    let clientSendId: String?
     let type: MessageType
     let text: String?
     let attachments: [MessageAttachment]?
@@ -210,8 +249,10 @@ struct CreateMessageRequest: Encodable {
         type: MessageType,
         text: String?,
         attachments: [MessageAttachment]?,
-        replyToMessageId: String? = nil
+        replyToMessageId: String? = nil,
+        clientSendId: String? = nil
     ) {
+        self.clientSendId = clientSendId
         self.type = type
         self.text = text
         self.attachments = attachments
