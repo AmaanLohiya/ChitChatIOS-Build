@@ -133,7 +133,7 @@ final class VoiceNoteRecorder: NSObject, AVAudioRecorderDelegate {
             AVFormatIDKey: kAudioFormatMPEG4AAC,
             AVSampleRateKey: 44_100,
             AVNumberOfChannelsKey: 1,
-            AVEncoderBitRateKey: 64_000,
+            AVEncoderBitRateKey: 96_000,
             AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue
         ]
 

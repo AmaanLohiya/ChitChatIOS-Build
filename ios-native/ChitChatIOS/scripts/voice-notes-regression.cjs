@@ -12,6 +12,7 @@ const chat = read('Screens/ChatDetailViewController.swift');
 const bubble = read('Screens/MessageBubbleCell.swift');
 const input = read('Screens/MessageInputBar.swift');
 const upload = read('Services/UploadService.swift');
+const callAudio = read('Services/CallAudioSession.swift');
 const plist = read('Info.plist');
 const project = fs.readFileSync(
   path.join(root, 'ChitChatIOS.xcodeproj', 'project.pbxproj'),
@@ -23,6 +24,13 @@ assert.match(audio, /AVPlayer/, 'iOS must play remote and local voice notes');
 assert.match(audio, /requestRecordPermission/, 'iOS must request microphone permission');
 assert.match(audio, /kAudioFormatMPEG4AAC/, 'iOS must encode AAC');
 assert.match(audio, /appendingPathExtension\("m4a"\)/, 'iOS must create M4A recordings');
+assert.match(audio, /AVSampleRateKey:\s*44_100/, 'iOS voice notes must use a 44.1 kHz profile');
+assert.match(audio, /AVNumberOfChannelsKey:\s*1/, 'iOS voice notes must use mono audio');
+assert.match(audio, /AVEncoderBitRateKey:\s*96_000/, 'iOS voice notes must use the clear 96 kbps AAC profile');
+assert.match(audio, /AVEncoderAudioQualityKey:\s*AVAudioQuality\.high/, 'iOS voice notes must retain high encoder quality');
+assert.match(audio, /previousCategory[\s\S]*restoreAudioSession\(\)/, 'Voice-note recording must restore the prior audio session');
+assert.match(audio, /mode:\s*\.spokenAudio/, 'Voice-note recording must use its own spoken-audio session profile');
+assert.match(callAudio, /\.voiceChat/, 'Voice/video call audio must retain its separate communication profile');
 assert.match(audio, /minimumDuration[\s\S]*0\.5/, 'iOS must enforce the minimum duration');
 assert.match(audio, /maximumDuration[\s\S]*10 \* 60/, 'iOS must enforce the maximum duration');
 assert.match(audio, /removeTemporaryFile/, 'iOS must clean temporary voice-note files');
@@ -57,4 +65,4 @@ for (const fileName of ['VoiceNoteAudioController.swift', 'VoiceNoteComposerView
   );
 }
 
-console.log('native iOS voice-note regression checks passed (30 checks)');
+console.log('native iOS voice-note regression checks passed (37 checks)');
