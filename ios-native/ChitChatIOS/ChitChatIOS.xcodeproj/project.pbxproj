@@ -24,6 +24,7 @@
 		A1000000000000000000000F /* ChitChatTypography.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000002F /* ChitChatTypography.swift */; };
 		A10000000000000000000010 /* ChitChatSpacing.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000030 /* ChitChatSpacing.swift */; };
 		A10000000000000000000011 /* ChitChatComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000031 /* ChitChatComponents.swift */; };
+		A10000000000000000000013 /* ThemeManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000034 /* ThemeManager.swift */; };
 		A10000000000000000000012 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000033 /* Assets.xcassets */; };
 		B20000000000000000000001 /* Chat.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000021 /* Chat.swift */; };
 		B20000000000000000000002 /* Contact.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000022 /* Contact.swift */; };
@@ -93,6 +94,7 @@
 		A10000000000000000000031 /* ChitChatComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChitChatComponents.swift; sourceTree = "<group>"; };
 		A10000000000000000000032 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A10000000000000000000033 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		A10000000000000000000034 /* ThemeManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThemeManager.swift; sourceTree = "<group>"; };
 		B20000000000000000000021 /* Chat.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Chat.swift; sourceTree = "<group>"; };
 		B20000000000000000000022 /* Contact.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Contact.swift; sourceTree = "<group>"; };
 		B20000000000000000000023 /* Message.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Message.swift; sourceTree = "<group>"; };
@@ -272,6 +274,7 @@
 		A10000000000000000000057 /* Theme */ = {
 			isa = PBXGroup;
 			children = (
+				A10000000000000000000034 /* ThemeManager.swift */,
 				A1000000000000000000002E /* ChitChatColors.swift */,
 				A1000000000000000000002F /* ChitChatTypography.swift */,
 				A10000000000000000000030 /* ChitChatSpacing.swift */,
@@ -374,6 +377,7 @@
 				A1000000000000000000000F /* ChitChatTypography.swift in Sources */,
 				A10000000000000000000010 /* ChitChatSpacing.swift in Sources */,
 				A10000000000000000000011 /* ChitChatComponents.swift in Sources */,
+				A10000000000000000000013 /* ThemeManager.swift in Sources */,
 				B20000000000000000000001 /* Chat.swift in Sources */,
 				B20000000000000000000002 /* Contact.swift in Sources */,
 				B20000000000000000000003 /* Message.swift in Sources */,

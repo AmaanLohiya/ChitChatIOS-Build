@@ -48,6 +48,13 @@ private final class ChitChatTabBar: UITabBar {
         activeIndicator.isHidden = false
         insertSubview(activeIndicator, belowSubview: tabButtons[0])
     }
+
+    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+        super.traitCollectionDidChange(previousTraitCollection)
+        if previousTraitCollection?.userInterfaceStyle != traitCollection.userInterfaceStyle {
+            activeIndicator.backgroundColor = ChitChatColors.tabActivePill
+        }
+    }
 }
 
 final class MainTabBarController: UITabBarController {
@@ -112,6 +119,16 @@ final class MainTabBarController: UITabBarController {
             makeNavigationController(root: calls),
             makeNavigationController(root: settings)
         ]
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleThemeChange),
+            name: .chitChatThemeDidChange,
+            object: nil
+        )
+    }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self, name: .chitChatThemeDidChange, object: nil)
     }
 
     func updateChatsUnreadBadge(total: Int) {
@@ -161,6 +178,15 @@ final class MainTabBarController: UITabBarController {
         tabBar.unselectedItemTintColor = ChitChatColors.textMuted
     }
 
+    @objc private func handleThemeChange() {
+        view.backgroundColor = ChitChatColors.background
+        configureTabBar()
+        viewControllers?
+            .compactMap { $0 as? UINavigationController }
+            .forEach { configureNavigationAppearance($0) }
+        tabBar.setNeedsLayout()
+    }
+
     private func tabImage(_ symbol: String, selected: Bool) -> UIImage? {
         UIImage(
             systemName: symbol,
@@ -173,6 +199,11 @@ final class MainTabBarController: UITabBarController {
 
     private func makeNavigationController(root: UIViewController) -> UINavigationController {
         let navigation = UINavigationController(rootViewController: root)
+        configureNavigationAppearance(navigation)
+        return navigation
+    }
+
+    private func configureNavigationAppearance(_ navigation: UINavigationController) {
         let appearance = UINavigationBarAppearance()
         appearance.configureWithOpaqueBackground()
         appearance.backgroundColor = ChitChatColors.header
@@ -192,6 +223,5 @@ final class MainTabBarController: UITabBarController {
         navigation.navigationBar.tintColor = ChitChatColors.accent
         navigation.navigationBar.prefersLargeTitles = false
         navigation.view.backgroundColor = ChitChatColors.background
-        return navigation
     }
 }

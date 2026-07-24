@@ -6,6 +6,8 @@ final class SettingsViewController: BaseViewController {
     private weak var profileAvatarView: ReplicaAvatarView?
     private weak var profileNameLabel: UILabel?
     private weak var profileBioLabel: UILabel?
+    private weak var darkModeToggle: UISwitch?
+    private weak var darkModeValueLabel: UILabel?
 
     init(user: User) {
         self.user = user
@@ -79,7 +81,7 @@ final class SettingsViewController: BaseViewController {
         content.addArrangedSubview(profile)
         content.addArrangedSubview(makeSectionTitle("APPEARANCE"))
         content.addArrangedSubview(makeRowsCard([
-            makeRow(symbol: "moon", title: "Dark mode", value: "Enabled"),
+            makeDarkModeRow(),
             makeRow(symbol: "paintpalette", title: "Chat wallpaper", value: "Default")
         ]))
         content.addArrangedSubview(makeSectionTitle("PRIVACY"))
@@ -347,6 +349,72 @@ final class SettingsViewController: BaseViewController {
             toggle.centerYAnchor.constraint(equalTo: card.centerYAnchor)
         ])
         return card
+    }
+
+    private func makeDarkModeRow() -> UIView {
+        let row = UIView()
+        row.heightAnchor.constraint(greaterThanOrEqualToConstant: 76).isActive = true
+
+        let icon = makeIconWrap("moon")
+        let titleLabel = UILabel()
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+        titleLabel.text = "Dark mode"
+        titleLabel.textColor = ChitChatColors.textPrimary
+        titleLabel.font = UIFont.systemFont(ofSize: 15, weight: .semibold)
+
+        let valueLabel = UILabel()
+        valueLabel.translatesAutoresizingMaskIntoConstraints = false
+        valueLabel.textColor = ChitChatColors.textMuted
+        valueLabel.font = UIFont.systemFont(ofSize: 12)
+        darkModeValueLabel = valueLabel
+
+        let textStack = UIStackView(arrangedSubviews: [titleLabel, valueLabel])
+        textStack.translatesAutoresizingMaskIntoConstraints = false
+        textStack.axis = .vertical
+        textStack.spacing = 1
+        textStack.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        let toggle = UISwitch()
+        toggle.translatesAutoresizingMaskIntoConstraints = false
+        toggle.isOn = ThemeManager.shared.isDark
+        toggle.onTintColor = ChitChatColors.accent
+        toggle.accessibilityLabel = "Dark mode"
+        toggle.addTarget(self, action: #selector(darkModeChanged(_:)), for: .valueChanged)
+        darkModeToggle = toggle
+
+        row.addSubview(icon)
+        row.addSubview(textStack)
+        row.addSubview(toggle)
+        NSLayoutConstraint.activate([
+            icon.leadingAnchor.constraint(equalTo: row.leadingAnchor, constant: 16),
+            icon.centerYAnchor.constraint(equalTo: row.centerYAnchor),
+            icon.widthAnchor.constraint(equalToConstant: 42),
+            icon.heightAnchor.constraint(equalToConstant: 42),
+            textStack.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 12),
+            textStack.trailingAnchor.constraint(lessThanOrEqualTo: toggle.leadingAnchor, constant: -12),
+            textStack.centerYAnchor.constraint(equalTo: row.centerYAnchor),
+            toggle.trailingAnchor.constraint(equalTo: row.trailingAnchor, constant: -16),
+            toggle.centerYAnchor.constraint(equalTo: row.centerYAnchor)
+        ])
+        updateDarkModePresentation()
+        return row
+    }
+
+    @objc private func darkModeChanged(_ sender: UISwitch) {
+        ThemeManager.shared.setDarkMode(sender.isOn)
+    }
+
+    override func applyTheme() {
+        super.applyTheme()
+        view.backgroundColor = ChitChatColors.background
+        updateDarkModePresentation()
+    }
+
+    private func updateDarkModePresentation() {
+        let isDark = ThemeManager.shared.isDark
+        darkModeToggle?.isOn = isDark
+        darkModeToggle?.accessibilityValue = isDark ? "On" : "Off"
+        darkModeValueLabel?.text = isDark ? "Enabled" : "Disabled"
     }
 
     private func makeSliderCard() -> UIView {

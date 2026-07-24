@@ -1,84 +1,83 @@
-﻿import UIKit
+import UIKit
 
 enum ChitChatColors {
-    static let background = UIColor(hex: "#071825")
-    static let authBackground = UIColor(hex: "#03131F")
-    static let backgroundAlt = UIColor(hex: "#0A1B27")
-    static let surface = UIColor(hex: "#102432")
-    static let surfaceAlt = UIColor(hex: "#0F2230")
-    static let surfaceRaised = UIColor(hex: "#132839")
-    static let header = UIColor(hex: "#0D2231")
-    static let inputBackground = UIColor(hex: "#0E1E2C")
-    static let inputBackgroundAlt = UIColor(hex: "#1A2D3C")
-    static let textPrimary = UIColor(hex: "#E8F0F4")
-    static let textSecondary = UIColor(hex: "#D5E2EA")
-    static let textMuted = UIColor(hex: "#8EA0AB")
-    static let placeholder = UIColor(hex: "#4C5D6D")
-    static let accent = UIColor(hex: "#4BC5A6")
-    static let accentStrong = UIColor(hex: "#35B596")
+    private static func adaptive(dark: String, light: String) -> UIColor {
+        UIColor { traits in
+            UIColor.chitChatRaw(hex: traits.userInterfaceStyle == .dark ? dark : light)
+        }
+    }
+
+    private static func adaptive(dark: String, light: String, alpha: CGFloat) -> UIColor {
+        UIColor { traits in
+            UIColor.chitChatRaw(hex: traits.userInterfaceStyle == .dark ? dark : light)
+                .withAlphaComponent(alpha)
+        }
+    }
+
+    static let background = adaptive(dark: "#071825", light: "#F0F2F5")
+    static let authBackground = adaptive(dark: "#03131F", light: "#F0F2F5")
+    static let backgroundAlt = adaptive(dark: "#0A1B27", light: "#ECEFF3")
+    static let surface = adaptive(dark: "#102432", light: "#FFFFFF")
+    static let surfaceAlt = adaptive(dark: "#0F2230", light: "#F7F8FA")
+    static let surfaceRaised = adaptive(dark: "#132839", light: "#EAF0F4")
+    static let header = adaptive(dark: "#0D2231", light: "#FAFBFD")
+    static let inputBackground = adaptive(dark: "#0E1E2C", light: "#E1E6EC")
+    static let inputBackgroundAlt = adaptive(dark: "#1A2D3C", light: "#E1E6EC")
+    static let textPrimary = adaptive(dark: "#E8F0F4", light: "#131B20")
+    static let textSecondary = adaptive(dark: "#D5E2EA", light: "#2B3740")
+    static let textMuted = adaptive(dark: "#8EA0AB", light: "#697680")
+    static let placeholder = adaptive(dark: "#4C5D6D", light: "#7B8792")
+    static let accent = adaptive(dark: "#4BC5A6", light: "#2BA889")
+    static let accentStrong = adaptive(dark: "#35B596", light: "#228D73")
+    static let textOnAccent = adaptive(dark: "#071825", light: "#FFFFFF")
     static let whatsappGreen = UIColor(hex: "#25D366")
-    static let disabledGreen = UIColor(hex: "#285E56")
-    static let danger = UIColor(hex: "#F16458")
-    static let border = UIColor.white.withAlphaComponent(0.08)
-    static let divider = UIColor.white.withAlphaComponent(0.05)
-    static let pressedOverlay = UIColor.white.withAlphaComponent(0.06)
+    static let disabledGreen = adaptive(dark: "#285E56", light: "#A8D9C9")
+    static let danger = adaptive(dark: "#F16458", light: "#D93025")
+    static let border = adaptive(dark: "#FFFFFF", light: "#14222E", alpha: 0.08)
+    static let divider = adaptive(dark: "#FFFFFF", light: "#14222E", alpha: 0.06)
+    static let pressedOverlay = adaptive(dark: "#FFFFFF", light: "#14222E", alpha: 0.06)
     static let welcomeGradientStart = UIColor(hex: "#67CA70")
     static let welcomeGradientMiddle = UIColor(hex: "#4DAE69")
     static let welcomeGradientEnd = UIColor(hex: "#3F9E8D")
 
-    // React Native ChatsScreen dark palette.
-    static let chatsScreen = UIColor(hex: "#071825")
-    static let chatsHeader = UIColor(hex: "#0D2231")
-    static let chatsSearch = UIColor(hex: "#1A2D3C")
-    static let chatsRow = UIColor(hex: "#0A1F2C")
-    static let chatsAvatarBackground = UIColor(hex: "#153041")
-    static let chatsPlaceholder = UIColor(hex: "#6F8393")
+    // React Native ChatsScreen palette.
+    static let chatsScreen = background
+    static let chatsHeader = header
+    static let chatsSearch = inputBackgroundAlt
+    static let chatsRow = adaptive(dark: "#0A1F2C", light: "#FFFFFF")
+    static let chatsAvatarBackground = adaptive(dark: "#153041", light: "#DDE6EB")
+    static let chatsPlaceholder = adaptive(dark: "#6F8393", light: "#7B8792")
     static let chatsReadBlue = UIColor(hex: "#2E86FF")
-    static let chatsDivider = UIColor.white.withAlphaComponent(0.05)
-    static let tabActivePill = UIColor(hex: "#4BC5A6").withAlphaComponent(0.16)
+    static let chatsDivider = divider
+    static let tabActivePill = adaptive(dark: "#4BC5A6", light: "#2BA889", alpha: 0.16)
 
-    // React Native ContactsScreen dark palette.
-    static let contactsScreen = UIColor(hex: "#071825")
-    static let contactsHeader = UIColor(hex: "#0D2231")
-    static let contactsCard = UIColor(hex: "#0F2230")
-    static let contactsRow = UIColor(hex: "#091B28")
-    static let contactsSearch = UIColor(hex: "#1A2D3C")
-    static let contactsBorder = UIColor.white.withAlphaComponent(0.05)
-    static let contactsSectionBorder = UIColor.white.withAlphaComponent(0.04)
-    static let contactsRowBorder = UIColor.white.withAlphaComponent(0.025)
-    static let contactsPressed = UIColor.white.withAlphaComponent(0.04)
-    static let contactsMenuPressed = UIColor.white.withAlphaComponent(0.06)
-    static let contactsInviteGlow = UIColor(hex: "#4BC5A6").withAlphaComponent(0.35)
-    static let contactsEmptyIcon = UIColor.white.withAlphaComponent(0.05)
+    // React Native ContactsScreen palette.
+    static let contactsScreen = background
+    static let contactsHeader = header
+    static let contactsCard = surfaceAlt
+    static let contactsRow = adaptive(dark: "#091B28", light: "#FFFFFF")
+    static let contactsSearch = inputBackgroundAlt
+    static let contactsBorder = divider
+    static let contactsSectionBorder = adaptive(dark: "#FFFFFF", light: "#14222E", alpha: 0.04)
+    static let contactsRowBorder = adaptive(dark: "#FFFFFF", light: "#14222E", alpha: 0.025)
+    static let contactsPressed = pressedOverlay
+    static let contactsMenuPressed = adaptive(dark: "#FFFFFF", light: "#14222E", alpha: 0.06)
+    static let contactsInviteGlow = adaptive(dark: "#4BC5A6", light: "#2BA889", alpha: 0.35)
+    static let contactsEmptyIcon = adaptive(dark: "#FFFFFF", light: "#14222E", alpha: 0.05)
 
     // React Native ChatDetailScreen palette.
-    static let chatDetailScreen = UIColor(hex: "#071825")
-    static let chatDetailHeader = UIColor(hex: "#0D2231")
-    static let chatDetailBorder = UIColor.white.withAlphaComponent(0.07)
-    static let chatDetailSent = UIColor(hex: "#2B6F5D")
-    static let chatDetailReceived = UIColor(hex: "#223341")
-    static let chatDetailInput = UIColor(hex: "#132839")
-    static let chatDetailPlaceholder = UIColor(hex: "#7D8D97")
-    static let chatDetailWallpaperOverlay = UIColor(
-        red: 2 / 255,
-        green: 12 / 255,
-        blue: 19 / 255,
-        alpha: 0.18
-    )
-    static let chatDetailSentTime = UIColor(
-        red: 223 / 255,
-        green: 245 / 255,
-        blue: 239 / 255,
-        alpha: 0.65
-    )
-    static let chatDetailReceivedTime = UIColor(
-        red: 214 / 255,
-        green: 227 / 255,
-        blue: 237 / 255,
-        alpha: 0.62
-    )
+    static let chatDetailScreen = background
+    static let chatDetailHeader = header
+    static let chatDetailBorder = border
+    static let chatDetailSent = adaptive(dark: "#2B6F5D", light: "#D9F3E8")
+    static let chatDetailReceived = adaptive(dark: "#223341", light: "#FFFFFF")
+    static let chatDetailInput = surfaceRaised
+    static let chatDetailPlaceholder = adaptive(dark: "#7D8D97", light: "#7B8792")
+    static let chatDetailWallpaperOverlay = adaptive(dark: "#020C13", light: "#FFFFFF", alpha: 0.18)
+    static let chatDetailSentTime = adaptive(dark: "#DFF5EF", light: "#376755", alpha: 0.72)
+    static let chatDetailReceivedTime = adaptive(dark: "#D6E3ED", light: "#5B6871", alpha: 0.78)
     static let chatDetailReadBlue = UIColor(hex: "#3B82F6")
-    static let chatDetailStateBackground = UIColor(hex: "#0D2231").withAlphaComponent(0.72)
+    static let chatDetailStateBackground = adaptive(dark: "#0D2231", light: "#FAFBFD", alpha: 0.86)
 
     static func gradientLayer(colors: [UIColor]) -> CAGradientLayer {
         let layer = CAGradientLayer()
@@ -90,29 +89,54 @@ enum ChitChatColors {
 }
 
 extension UIColor {
-    convenience init(hex: String) {
-        let hex = hex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
-        var int: UInt64 = 0
-        Scanner(string: hex).scanHexInt64(&int)
+    fileprivate static func chitChatRaw(hex: String) -> UIColor {
+        let normalized = hex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted).uppercased()
+        var value: UInt64 = 0
+        Scanner(string: normalized).scanHexInt64(&value)
         let red: UInt64
         let green: UInt64
         let blue: UInt64
-        switch hex.count {
+        switch normalized.count {
         case 3:
-            red = (int >> 8) * 17
-            green = ((int >> 4) & 0xF) * 17
-            blue = (int & 0xF) * 17
+            red = (value >> 8) * 17
+            green = ((value >> 4) & 0xF) * 17
+            blue = (value & 0xF) * 17
         default:
-            red = int >> 16
-            green = (int >> 8) & 0xFF
-            blue = int & 0xFF
+            red = value >> 16
+            green = (value >> 8) & 0xFF
+            blue = value & 0xFF
         }
-        self.init(
+        return UIColor(
             red: CGFloat(red) / 255,
             green: CGFloat(green) / 255,
             blue: CGFloat(blue) / 255,
             alpha: 1
         )
     }
-}
 
+    // Existing programmatic screens used these dark literals directly. Keeping
+    // their equivalent colors dynamic avoids a partial light-mode migration.
+    private static let chitChatLightEquivalents: [String: String] = [
+        "071825": "F0F2F5", "03131F": "F0F2F5", "0A1B27": "ECEFF3",
+        "0A1F2C": "FFFFFF", "091B28": "FFFFFF", "0B1F2C": "F7F8FA",
+        "0D2231": "FAFBFD", "0E1E2C": "E1E6EC", "0F2230": "F7F8FA",
+        "102432": "FFFFFF", "122C3A": "EAF0F4", "132839": "EAF0F4",
+        "153041": "DDE6EB", "1A2D3C": "E1E6EC", "1A3140": "EAF0F4",
+        "223341": "FFFFFF", "233B4C": "D3DAE1", "2B6F5D": "D9F3E8",
+        "285E56": "A8D9C9", "35B596": "228D73", "4BC5A6": "2BA889",
+        "4C5D6D": "7B8792", "6F8393": "7B8792", "7D8D97": "7B8792",
+        "8EA0AB": "697680", "93A7B2": "697680", "D5E2EA": "2B3740",
+        "E7EFF3": "131B20", "E8F0F4": "131B20"
+    ]
+
+    convenience init(hex: String) {
+        let normalized = hex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted).uppercased()
+        if let light = UIColor.chitChatLightEquivalents[normalized] {
+            self.init { traits in
+                UIColor.chitChatRaw(hex: traits.userInterfaceStyle == .dark ? normalized : light)
+            }
+        } else {
+            self.init(cgColor: UIColor.chitChatRaw(hex: normalized).cgColor)
+        }
+    }
+}

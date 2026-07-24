@@ -17,8 +17,7 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
 
         let window = UIWindow(windowScene: windowScene)
         window.rootViewController = navigationController
-        window.backgroundColor = ChitChatColors.authBackground
-        window.tintColor = ChitChatColors.accent
+        ThemeManager.shared.apply(to: window)
         self.window = window
         window.makeKeyAndVisible()
 

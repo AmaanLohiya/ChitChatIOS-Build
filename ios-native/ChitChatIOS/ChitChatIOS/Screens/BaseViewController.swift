@@ -1,11 +1,39 @@
 ﻿import UIKit
 
 class BaseViewController: UIViewController {
-    override var preferredStatusBarStyle: UIStatusBarStyle { .lightContent }
+    override var preferredStatusBarStyle: UIStatusBarStyle {
+        ThemeManager.shared.isDark ? .lightContent : .darkContent
+    }
 
     override func viewDidLoad() {
         super.viewDidLoad()
+        applyTheme()
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleThemeChange),
+            name: .chitChatThemeDidChange,
+            object: nil
+        )
+    }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self, name: .chitChatThemeDidChange, object: nil)
+    }
+
+    func applyTheme() {
         view.backgroundColor = ChitChatColors.authBackground
+        setNeedsStatusBarAppearanceUpdate()
+    }
+
+    @objc private func handleThemeChange() {
+        applyTheme()
+    }
+
+    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+        super.traitCollectionDidChange(previousTraitCollection)
+        if previousTraitCollection?.userInterfaceStyle != traitCollection.userInterfaceStyle {
+            applyTheme()
+        }
     }
 
     func showAlert(title: String = "ChitChat", message: String) {
