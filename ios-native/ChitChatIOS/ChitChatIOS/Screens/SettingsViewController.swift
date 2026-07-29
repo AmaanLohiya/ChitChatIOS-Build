@@ -8,6 +8,8 @@ final class SettingsViewController: BaseViewController {
     private weak var profileBioLabel: UILabel?
     private weak var darkModeToggle: UISwitch?
     private weak var darkModeValueLabel: UILabel?
+    private weak var profileCameraBadge: UIImageView?
+    private var themedCards: [UIView] = []
 
     init(user: User) {
         self.user = user
@@ -62,7 +64,7 @@ final class SettingsViewController: BaseViewController {
         let title = UILabel()
         title.translatesAutoresizingMaskIntoConstraints = false
         title.text = "Settings"
-        title.textColor = UIColor(hex: "#E7EFF3")
+        title.textColor = ChitChatColors.textPrimary
         title.font = UIFont.systemFont(ofSize: 22, weight: .bold)
         header.addSubview(title)
 
@@ -156,7 +158,7 @@ final class SettingsViewController: BaseViewController {
     private func makeProfileCard() -> UIControl {
         let card = UIControl()
         card.translatesAutoresizingMaskIntoConstraints = false
-        card.backgroundColor = UIColor(hex: "#102432")
+        applyCardTheme(to: card)
         card.layer.cornerRadius = 18
         card.layer.borderColor = ChitChatColors.border.cgColor
         card.layer.borderWidth = 1
@@ -174,13 +176,14 @@ final class SettingsViewController: BaseViewController {
         camera.contentMode = .center
         camera.layer.cornerRadius = 11
         camera.clipsToBounds = true
-        camera.layer.borderColor = UIColor(hex: "#102432").cgColor
+        camera.layer.borderColor = ChitChatColors.surface.cgColor
         camera.layer.borderWidth = 2
+        profileCameraBadge = camera
 
         let name = UILabel()
         name.translatesAutoresizingMaskIntoConstraints = false
         name.text = user.name.isEmpty ? "You" : user.name
-        name.textColor = UIColor(hex: "#E7EFF3")
+        name.textColor = ChitChatColors.textPrimary
         name.font = UIFont.systemFont(ofSize: 17, weight: .semibold)
         profileNameLabel = name
 
@@ -273,7 +276,7 @@ final class SettingsViewController: BaseViewController {
         let titleLabel = UILabel()
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
         titleLabel.text = title
-        titleLabel.textColor = UIColor(hex: "#E7EFF3")
+        titleLabel.textColor = ChitChatColors.textPrimary
         titleLabel.font = UIFont.systemFont(ofSize: 15, weight: .semibold)
         let valueLabel = UILabel()
         valueLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -313,7 +316,7 @@ final class SettingsViewController: BaseViewController {
         let titleLabel = UILabel()
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
         titleLabel.text = title
-        titleLabel.textColor = UIColor(hex: "#E7EFF3")
+        titleLabel.textColor = ChitChatColors.textPrimary
         titleLabel.font = UIFont.systemFont(ofSize: 15, weight: .semibold)
         titleLabel.lineBreakMode = .byTruncatingTail
         let valueLabel = UILabel()
@@ -407,7 +410,11 @@ final class SettingsViewController: BaseViewController {
     override func applyTheme() {
         super.applyTheme()
         view.backgroundColor = ChitChatColors.background
+        themedCards.forEach(applyCardTheme)
+        profileCameraBadge?.layer.borderColor = ChitChatColors.surface.cgColor
         updateDarkModePresentation()
+        view.setNeedsLayout()
+        view.setNeedsDisplay()
     }
 
     private func updateDarkModePresentation() {
@@ -424,7 +431,7 @@ final class SettingsViewController: BaseViewController {
         let title = UILabel()
         title.translatesAutoresizingMaskIntoConstraints = false
         title.text = "Notification volume"
-        title.textColor = UIColor(hex: "#E7EFF3")
+        title.textColor = ChitChatColors.textPrimary
         title.font = UIFont.systemFont(ofSize: 15, weight: .semibold)
         let value = UILabel()
         value.translatesAutoresizingMaskIntoConstraints = false
@@ -435,7 +442,7 @@ final class SettingsViewController: BaseViewController {
         slider.translatesAutoresizingMaskIntoConstraints = false
         slider.value = 0.75
         slider.minimumTrackTintColor = ChitChatColors.accent
-        slider.maximumTrackTintColor = UIColor(hex: "#233B4C")
+        slider.maximumTrackTintColor = ChitChatColors.settingsSliderRail
         slider.thumbTintColor = ChitChatColors.accent
         card.addSubview(icon)
         card.addSubview(title)
@@ -481,12 +488,19 @@ final class SettingsViewController: BaseViewController {
     private func makeCard() -> UIView {
         let card = UIView()
         card.translatesAutoresizingMaskIntoConstraints = false
-        card.backgroundColor = UIColor(hex: "#102432")
+        applyCardTheme(to: card)
+        card.clipsToBounds = true
+        return card
+    }
+
+    private func applyCardTheme(to card: UIView) {
+        card.backgroundColor = ChitChatColors.surface
         card.layer.cornerRadius = 18
         card.layer.borderColor = ChitChatColors.border.cgColor
         card.layer.borderWidth = 1
-        card.clipsToBounds = true
-        return card
+        if !themedCards.contains(where: { $0 === card }) {
+            themedCards.append(card)
+        }
     }
 
     private func makeIconWrap(_ symbol: String) -> UIView {

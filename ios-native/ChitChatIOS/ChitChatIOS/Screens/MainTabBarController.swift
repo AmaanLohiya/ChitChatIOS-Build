@@ -179,12 +179,15 @@ final class MainTabBarController: UITabBarController {
     }
 
     @objc private func handleThemeChange() {
+        guard isViewLoaded else { return }
         view.backgroundColor = ChitChatColors.background
         configureTabBar()
         viewControllers?
             .compactMap { $0 as? UINavigationController }
             .forEach { configureNavigationAppearance($0) }
         tabBar.setNeedsLayout()
+        view.setNeedsLayout()
+        view.setNeedsDisplay()
     }
 
     private func tabImage(_ symbol: String, selected: Bool) -> UIImage? {

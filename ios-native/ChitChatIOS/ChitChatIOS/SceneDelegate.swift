@@ -17,7 +17,7 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
 
         let window = UIWindow(windowScene: windowScene)
         window.rootViewController = navigationController
-        ThemeManager.shared.apply(to: window)
+        ThemeManager.shared.register(applicationWindow: window)
         self.window = window
         window.makeKeyAndVisible()
 

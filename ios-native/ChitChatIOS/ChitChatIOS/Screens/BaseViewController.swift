@@ -26,7 +26,10 @@ class BaseViewController: UIViewController {
     }
 
     @objc private func handleThemeChange() {
+        guard isViewLoaded else { return }
         applyTheme()
+        view.setNeedsLayout()
+        view.setNeedsDisplay()
     }
 
     override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
