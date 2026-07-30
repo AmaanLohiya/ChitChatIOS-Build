@@ -75,6 +75,28 @@ enum UploadServiceError: LocalizedError {
     }
 }
 
+private final class UploadProgressDelegate: NSObject, URLSessionTaskDelegate {
+    private let onProgress: (Double) -> Void
+
+    init(onProgress: @escaping (Double) -> Void) {
+        self.onProgress = onProgress
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        didSendBodyData bytesSent: Int64,
+        totalBytesSent: Int64,
+        totalBytesExpectedToSend: Int64
+    ) {
+        guard totalBytesExpectedToSend > 0 else { return }
+        let progress = min(max(Double(totalBytesSent) / Double(totalBytesExpectedToSend), 0), 1)
+        DispatchQueue.main.async { [onProgress] in
+            onProgress(progress)
+        }
+    }
+}
+
 final class UploadService {
     private let baseURL = APIClient.shared.resolvedURL(for: "/") ?? URL(fileURLWithPath: "/")
     private let apiClient: APIClient
@@ -90,7 +112,8 @@ final class UploadService {
         fileName: String,
         mimeType: String,
         usage: UploadUsage,
-        resourceType: UploadResourceType
+        resourceType: UploadResourceType,
+        progress: ((Double) -> Void)? = nil
     ) async throws -> Upload {
         try await performUpload(
             fileURL: fileURL,
@@ -98,7 +121,8 @@ final class UploadService {
             mimeType: mimeType,
             usage: usage,
             resourceType: resourceType,
-            retryOnUnauthorized: true
+            retryOnUnauthorized: true,
+            progress: progress
         )
     }
 
@@ -135,6 +159,8 @@ final class UploadService {
             return "image/heic"
         case "m4a":
             return "audio/mp4"
+        case "mp4", "m4v":
+            return "video/mp4"
         default:
             break
         }
@@ -147,7 +173,8 @@ final class UploadService {
         mimeType: String,
         usage: UploadUsage,
         resourceType: UploadResourceType,
-        retryOnUnauthorized: Bool
+        retryOnUnauthorized: Bool,
+        progress: ((Double) -> Void)?
     ) async throws -> Upload {
         guard FileManager.default.fileExists(atPath: fileURL.path) else {
             throw UploadServiceError.missingFile
@@ -172,10 +199,30 @@ final class UploadService {
             resourceType: resourceType
         )
 
+        progress?(0)
+        let progressSession: URLSession?
+        let requestSession: URLSession
+        if let progress {
+            let delegate = UploadProgressDelegate(onProgress: progress)
+            let session = URLSession(
+                configuration: self.session.configuration,
+                delegate: delegate,
+                delegateQueue: nil
+            )
+            progressSession = session
+            requestSession = session
+        } else {
+            progressSession = nil
+            requestSession = session
+        }
+        defer {
+            progressSession?.finishTasksAndInvalidate()
+        }
+
         let data: Data
         let response: URLResponse
         do {
-            (data, response) = try await session.data(for: request)
+            (data, response) = try await requestSession.data(for: request)
         } catch {
             debugUploadFailure(
                 statusCode: nil,
@@ -202,7 +249,8 @@ final class UploadService {
                     mimeType: mimeType,
                     usage: usage,
                     resourceType: resourceType,
-                    retryOnUnauthorized: false
+                    retryOnUnauthorized: false,
+                    progress: progress
                 )
             } catch let error as APIClientError {
                 throw error
@@ -236,6 +284,7 @@ final class UploadService {
         do {
             let envelope = try JSONDecoder().decode(APIEnvelope<Upload>.self, from: data)
             if envelope.success, let upload = envelope.data {
+                progress?(1)
                 return upload
             }
             if let error = envelope.error {

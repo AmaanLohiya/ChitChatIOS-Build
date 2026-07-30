@@ -1,3 +1,4 @@
+import AVFoundation
 import PhotosUI
 import QuickLook
 import UIKit
@@ -12,6 +13,10 @@ private enum MediaSendError: LocalizedError {
     case cannotOpenDocument
     case voiceRecordingUnavailable
     case voiceRecordingInCall
+    case videoUnavailable
+    case unsupportedVideoFormat
+    case videoTooLarge
+    case videoTooLong
 
     var errorDescription: String? {
         switch self {
@@ -31,6 +36,14 @@ private enum MediaSendError: LocalizedError {
             return "Recording is no longer available. Record it again."
         case .voiceRecordingInCall:
             return "End the current call before recording a voice note."
+        case .videoUnavailable:
+            return "Video is no longer available. Select it again."
+        case .unsupportedVideoFormat:
+            return "Choose an MP4 video to send."
+        case .videoTooLarge:
+            return "Video is too large. Choose a video under 50 MB."
+        case .videoTooLong:
+            return "Videos can be up to 2 minutes long."
         }
     }
 }
@@ -47,6 +60,8 @@ private enum PendingMessagePayload {
         text: String?,
         localFileSize: Int?,
         localDuration: Double?,
+        localWidth: Int?,
+        localHeight: Int?,
         replyToMessageId: String?
     )
 }
@@ -58,6 +73,16 @@ private struct PendingMessageSend {
     var attempts: Int
     var isInFlight: Bool
     var cleanupFileURL: URL?
+    var uploadProgress: Double?
+}
+
+private struct VideoMediaDraft {
+    let fileURL: URL
+    let fileName: String
+    let duration: TimeInterval
+    let fileSize: Int
+    let width: Int
+    let height: Int
 }
 
 private enum PickedMediaFile {
@@ -248,6 +273,116 @@ private enum PickedMediaFile {
         guard FileManager.default.isReadableFile(atPath: url.path) else {
             throw MediaSendError.selectedFileUnavailable
         }
+    }
+
+    static func prepareVideoUpload(
+        sourceURL: URL,
+        originalFileName: String
+    ) async throws -> VideoMediaDraft {
+        try validateReadableFile(at: sourceURL)
+        let outputURL: URL
+        if sourceURL.pathExtension.lowercased() == "mp4" {
+            outputURL = sourceURL
+        } else {
+            let outputName = "\(safeFileName(URL(fileURLWithPath: originalFileName).deletingPathExtension().lastPathComponent)).mp4"
+            let destination = uniqueTemporaryURL(
+                preferredFileName: outputName,
+                prefix: "chitchat-video-export",
+                excluding: sourceURL
+            )
+            do {
+                try await exportMP4(sourceURL: sourceURL, destinationURL: destination)
+                removeTemporaryFile(at: sourceURL)
+            } catch {
+                removeTemporaryFile(at: destination)
+                throw MediaSendError.unsupportedVideoFormat
+            }
+            outputURL = destination
+        }
+
+        guard isMP4Container(at: outputURL) else {
+            removeTemporaryFile(at: outputURL)
+            throw MediaSendError.unsupportedVideoFormat
+        }
+        guard let fileSize = fileSize(at: outputURL) else {
+            removeTemporaryFile(at: outputURL)
+            throw MediaSendError.videoUnavailable
+        }
+        guard fileSize <= 50 * 1024 * 1024 else {
+            removeTemporaryFile(at: outputURL)
+            throw MediaSendError.videoTooLarge
+        }
+
+        let asset = AVURLAsset(url: outputURL)
+        let duration = asset.duration.seconds
+        guard duration.isFinite, duration > 0 else {
+            removeTemporaryFile(at: outputURL)
+            throw MediaSendError.unsupportedVideoFormat
+        }
+        guard duration <= 2 * 60 else {
+            removeTemporaryFile(at: outputURL)
+            throw MediaSendError.videoTooLong
+        }
+        guard let track = asset.tracks(withMediaType: .video).first else {
+            removeTemporaryFile(at: outputURL)
+            throw MediaSendError.unsupportedVideoFormat
+        }
+
+        let transformedSize = track.naturalSize.applying(track.preferredTransform)
+        let width = max(1, Int(abs(transformedSize.width).rounded()))
+        let height = max(1, Int(abs(transformedSize.height).rounded()))
+        let safeBase = safeFileName(URL(fileURLWithPath: originalFileName).deletingPathExtension().lastPathComponent)
+        let fileName = "\(safeBase.isEmpty ? "video-message" : safeBase).mp4"
+        return VideoMediaDraft(
+            fileURL: outputURL,
+            fileName: fileName,
+            duration: duration,
+            fileSize: fileSize,
+            width: width,
+            height: height
+        )
+    }
+
+    static func removeTemporaryFile(at url: URL?) {
+        guard let url else { return }
+        let temporaryPath = FileManager.default.temporaryDirectory.standardizedFileURL.path
+        let candidatePath = url.standardizedFileURL.path
+        guard candidatePath.hasPrefix(temporaryPath) else { return }
+        try? FileManager.default.removeItem(at: url)
+    }
+
+    private static func exportMP4(sourceURL: URL, destinationURL: URL) async throws {
+        let asset = AVURLAsset(url: sourceURL)
+        guard let export = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetMediumQuality),
+              export.supportedFileTypes.contains(.mp4) else {
+            throw MediaSendError.unsupportedVideoFormat
+        }
+        if FileManager.default.fileExists(atPath: destinationURL.path) {
+            try FileManager.default.removeItem(at: destinationURL)
+        }
+        export.outputURL = destinationURL
+        export.outputFileType = .mp4
+        export.shouldOptimizeForNetworkUse = true
+
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            export.exportAsynchronously {
+                switch export.status {
+                case .completed:
+                    continuation.resume()
+                case .failed, .cancelled:
+                    continuation.resume(throwing: export.error ?? MediaSendError.unsupportedVideoFormat)
+                default:
+                    continuation.resume(throwing: MediaSendError.unsupportedVideoFormat)
+                }
+            }
+        }
+    }
+
+    private static func isMP4Container(at url: URL) -> Bool {
+        guard let data = try? Data(contentsOf: url, options: [.mappedIfSafe]), data.count >= 12 else {
+            return false
+        }
+        return String(data: data[4..<8], encoding: .ascii) == "ftyp"
     }
 }
 
@@ -604,7 +739,7 @@ final class ChatDetailViewController: BaseViewController {
             voiceNoteRecorder.cancel()
             voiceNotePlayback.stop()
             cleanupFileURLs.forEach {
-                VoiceNoteRecorder.removeTemporaryFile(at: $0)
+                PickedMediaFile.removeTemporaryFile(at: $0)
             }
         }
         pendingSends.removeAll()
@@ -1544,7 +1679,8 @@ final class ChatDetailViewController: BaseViewController {
             state: .sending,
             attempts: 0,
             isInFlight: false,
-            cleanupFileURL: cleanupFileURL
+            cleanupFileURL: cleanupFileURL,
+            uploadProgress: message.type == .video ? 0 : nil
         )
         messages.append(message)
         messages.sort(by: sortMessages)
@@ -1559,6 +1695,11 @@ final class ChatDetailViewController: BaseViewController {
         pending.isInFlight = true
         pending.attempts += 1
         pending.state = .sending
+        if case .upload(_, _, _, _, _, let messageType, _, _, _, _, _, _) = pending.payload,
+           messageType == .video,
+           pending.uploadProgress == nil {
+            pending.uploadProgress = 0
+        }
         pendingSends[clientSendId] = pending
         inputBar.setSending(true)
         reloadPendingMessage(clientSendId)
@@ -1614,13 +1755,17 @@ final class ChatDetailViewController: BaseViewController {
             text,
             localFileSize,
             localDuration,
+            localWidth,
+            localHeight,
             replyToMessageId
         ):
             if pending.attempts > 1,
                !FileManager.default.fileExists(atPath: fileURL.path) {
                 throw messageType == .voice
                     ? MediaSendError.voiceRecordingUnavailable
-                    : MediaSendError.selectedFileUnavailable
+                    : messageType == .video
+                        ? MediaSendError.videoUnavailable
+                        : MediaSendError.selectedFileUnavailable
             }
             let upload: Upload
             do {
@@ -1629,7 +1774,12 @@ final class ChatDetailViewController: BaseViewController {
                     fileName: fileName,
                     mimeType: mimeType,
                     usage: usage,
-                    resourceType: resourceType
+                    resourceType: resourceType,
+                    progress: messageType == .video ? { [weak self] progress in
+                        Task { @MainActor [weak self] in
+                            self?.updatePendingUploadProgress(clientSendId, progress: progress)
+                        }
+                    } : nil
                 )
             } catch {
                 throw MediaSendError.uploadFailed
@@ -1641,8 +1791,8 @@ final class ChatDetailViewController: BaseViewController {
                 fileName: uploadAttachment.fileName,
                 size: uploadAttachment.size,
                 duration: localDuration ?? uploadAttachment.duration,
-                width: uploadAttachment.width,
-                height: uploadAttachment.height,
+                width: localWidth ?? uploadAttachment.width,
+                height: localHeight ?? uploadAttachment.height,
                 thumbnailUrl: uploadAttachment.thumbnailUrl
             )
             request = CreateMessageRequest(
@@ -1655,6 +1805,7 @@ final class ChatDetailViewController: BaseViewController {
             await MainActor.run {
                 guard var latest = self.pendingSends[clientSendId] else { return }
                 latest.payload = .ready(request)
+                latest.uploadProgress = messageType == .video ? 1 : latest.uploadProgress
                 self.pendingSends[clientSendId] = latest
                 self.reloadPendingMessage(clientSendId)
             }
@@ -1681,6 +1832,13 @@ final class ChatDetailViewController: BaseViewController {
             return
         }
         tableView.reloadRows(at: [IndexPath(row: index, section: 0)], with: .none)
+    }
+
+    private func updatePendingUploadProgress(_ clientSendId: String, progress: Double) {
+        guard var pending = pendingSends[clientSendId], pending.state == .sending else { return }
+        pending.uploadProgress = min(max(progress, 0), 1)
+        pendingSends[clientSendId] = pending
+        reloadPendingMessage(clientSendId)
     }
 
     private func retryPendingMessage(_ clientSendId: String) {
@@ -1837,6 +1995,9 @@ final class ChatDetailViewController: BaseViewController {
         sheet.addAction(UIAlertAction(title: "Photo", style: .default) { [weak self] _ in
             self?.presentPhotoPicker()
         })
+        sheet.addAction(UIAlertAction(title: "Video", style: .default) { [weak self] _ in
+            self?.presentVideoPicker()
+        })
         sheet.addAction(UIAlertAction(title: "Document", style: .default) { [weak self] _ in
             self?.presentDocumentPicker()
         })
@@ -1849,6 +2010,17 @@ final class ChatDetailViewController: BaseViewController {
     private func presentPhotoPicker() {
         var configuration = PHPickerConfiguration(photoLibrary: .shared())
         configuration.filter = .images
+        configuration.selectionLimit = 1
+        configuration.preferredAssetRepresentationMode = .current
+
+        let picker = PHPickerViewController(configuration: configuration)
+        picker.delegate = self
+        present(picker, animated: true)
+    }
+
+    private func presentVideoPicker() {
+        var configuration = PHPickerConfiguration(photoLibrary: .shared())
+        configuration.filter = .videos
         configuration.selectionLimit = 1
         configuration.preferredAssetRepresentationMode = .current
 
@@ -1891,6 +2063,38 @@ final class ChatDetailViewController: BaseViewController {
         )
     }
 
+    private func presentVideoDraft(_ draft: VideoMediaDraft) {
+        let preview = VideoMessagePreviewViewController(
+            videoURL: draft.fileURL,
+            fileName: draft.fileName,
+            duration: draft.duration,
+            fileSize: draft.fileSize,
+            onSend: { [weak self] in
+                self?.uploadAndSendVideo(draft)
+            },
+            onDiscard: {
+                PickedMediaFile.removeTemporaryFile(at: draft.fileURL)
+            }
+        )
+        present(preview, animated: true)
+    }
+
+    private func uploadAndSendVideo(_ draft: VideoMediaDraft) {
+        uploadAndSendMedia(
+            fileURL: draft.fileURL,
+            fileName: draft.fileName,
+            mimeType: "video/mp4",
+            usage: .message,
+            resourceType: .video,
+            messageType: .video,
+            text: nil,
+            localDuration: draft.duration,
+            localWidth: draft.width,
+            localHeight: draft.height,
+            cleanupFileURL: draft.fileURL
+        )
+    }
+
     private func uploadAndSendMedia(
         fileURL: URL,
         fileName: String,
@@ -1900,6 +2104,8 @@ final class ChatDetailViewController: BaseViewController {
         messageType: MessageType,
         text: String?,
         localDuration: Double? = nil,
+        localWidth: Int? = nil,
+        localHeight: Int? = nil,
         cleanupFileURL: URL? = nil
     ) {
         guard mediaTask == nil, sendTask == nil else { return }
@@ -1913,8 +2119,8 @@ final class ChatDetailViewController: BaseViewController {
             fileName: fileName,
             size: localFileSize,
             duration: localDuration,
-            width: nil,
-            height: nil,
+            width: localWidth,
+            height: localHeight,
             thumbnailUrl: nil
         )
         let localMessage = Message.pending(
@@ -1939,6 +2145,8 @@ final class ChatDetailViewController: BaseViewController {
                 text: text,
                 localFileSize: localFileSize,
                 localDuration: localDuration,
+                localWidth: localWidth,
+                localHeight: localHeight,
                 replyToMessageId: replyMessageID
             ),
             usesMediaTask: true,
@@ -1960,6 +2168,20 @@ final class ChatDetailViewController: BaseViewController {
                 return
             }
             previewDocument(attachment: attachment, sourceURL: url)
+        case .video:
+            guard let url = URL(string: attachment.url), !attachment.url.isEmpty else {
+                showAlert(message: "Video URL is missing.")
+                return
+            }
+            present(
+                VideoMessagePreviewViewController(
+                    videoURL: url,
+                    fileName: attachment.fileName ?? "Video",
+                    duration: attachment.duration,
+                    fileSize: attachment.size
+                ),
+                animated: true
+            )
         default:
             break
         }
@@ -2689,7 +2911,7 @@ final class ChatDetailViewController: BaseViewController {
            voiceNotePlayback.state.sourceID == localMessage.id {
             voiceNotePlayback.stop()
         }
-        VoiceNoteRecorder.removeTemporaryFile(at: pending.cleanupFileURL)
+        PickedMediaFile.removeTemporaryFile(at: pending.cleanupFileURL)
     }
 
     private func acknowledgeRead(messageID: String) async throws -> MarkReadResponse {
@@ -3041,9 +3263,14 @@ extension ChatDetailViewController: UITableViewDataSource, UITableViewDelegate {
         let localSendState = message.clientSendId.flatMap { pendingSends[$0]?.state }
         let localSendLabel: String? = message.clientSendId.flatMap { clientSendId in
             guard let pending = pendingSends[clientSendId], pending.state == .sending else { return nil }
-            if case let .upload(_, _, _, _, _, messageType, _, _, _, _) = pending.payload,
-               messageType == .voice || messageType == .audio {
-                return "Uploading voice note..."
+            if case let .upload(_, _, _, _, _, messageType, _, _, _, _, _, _) = pending.payload {
+                if messageType == .voice || messageType == .audio {
+                    return "Uploading voice note..."
+                }
+                if messageType == .video {
+                    let percent = Int(((pending.uploadProgress ?? 0) * 100).rounded())
+                    return "Uploading video \(min(max(percent, 0), 100))%..."
+                }
             }
             return "Sending..."
         }
@@ -3119,6 +3346,76 @@ extension ChatDetailViewController: PHPickerViewControllerDelegate {
     func picker(_ picker: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {
         picker.dismiss(animated: true)
         guard let provider = results.first?.itemProvider else { return }
+
+        if let videoTypeIdentifier = provider.registeredTypeIdentifiers.first(where: {
+            guard let type = UTType($0) else { return false }
+            return type.conforms(to: .movie) || type.conforms(to: .video)
+        }) {
+            provider.loadFileRepresentation(forTypeIdentifier: videoTypeIdentifier) { [weak self] url, error in
+                guard let self else { return }
+                if let error {
+                    DispatchQueue.main.async {
+                        self.showAlert(message: error.localizedDescription)
+                    }
+                    return
+                }
+                guard let url else {
+                    DispatchQueue.main.async {
+                        self.showAlert(message: "Selected video could not be read.")
+                    }
+                    return
+                }
+
+                let fileType = UTType(videoTypeIdentifier)
+                let sourceFileName = PickedMediaFile.fileName(
+                    suggestedName: provider.suggestedName,
+                    sourceURL: url,
+                    fallbackBase: "video-\(Int(Date().timeIntervalSince1970))",
+                    fallbackExtension: fileType?.preferredFilenameExtension ?? "mp4",
+                    mimeType: fileType?.preferredMIMEType
+                )
+
+                let temporarySource: URL
+                do {
+                    temporarySource = try PickedMediaFile.copyToTemporaryFile(
+                        sourceURL: url,
+                        preferredFileName: sourceFileName
+                    )
+                } catch {
+                    DispatchQueue.main.async {
+                        self.showAlert(message: MediaSendError.fileCopyFailed.localizedDescription)
+                    }
+                    return
+                }
+
+                Task { [weak self] in
+                    do {
+                        let draft = try await PickedMediaFile.prepareVideoUpload(
+                            sourceURL: temporarySource,
+                            originalFileName: sourceFileName
+                        )
+                        guard !Task.isCancelled else {
+                            PickedMediaFile.removeTemporaryFile(at: draft.fileURL)
+                            return
+                        }
+                        await MainActor.run {
+                            guard let self else {
+                                PickedMediaFile.removeTemporaryFile(at: draft.fileURL)
+                                return
+                            }
+                            self.presentVideoDraft(draft)
+                        }
+                    } catch {
+                        PickedMediaFile.removeTemporaryFile(at: temporarySource)
+                        guard !Task.isCancelled else { return }
+                        await MainActor.run {
+                            self?.showAlert(message: error.localizedDescription)
+                        }
+                    }
+                }
+            }
+            return
+        }
 
         let typeIdentifier = provider.registeredTypeIdentifiers.first {
             guard let type = UTType($0) else { return false }

@@ -227,6 +227,11 @@ final class MessageBubbleCell: UITableViewCell {
     private let replySummaryLabel = UILabel()
     private let messageLabel = UILabel()
     private let mediaImageView = UIImageView()
+    private let videoSurfaceView = UIView()
+    private let videoPlayBadge = UIView()
+    private let videoPlayIcon = UIImageView()
+    private let videoDurationLabel = UILabel()
+    private let videoNameLabel = UILabel()
     private let captionLabel = UILabel()
     private let documentIconWrap = UIView()
     private let documentIcon = UIImageView()
@@ -304,6 +309,39 @@ final class MessageBubbleCell: UITableViewCell {
         mediaImageView.clipsToBounds = true
         mediaImageView.backgroundColor = ChitChatColors.chatDetailInput
         mediaImageView.isHidden = true
+
+        videoSurfaceView.translatesAutoresizingMaskIntoConstraints = false
+        videoSurfaceView.backgroundColor = ChitChatColors.chatDetailInput
+        videoSurfaceView.isHidden = true
+
+        videoPlayBadge.translatesAutoresizingMaskIntoConstraints = false
+        videoPlayBadge.backgroundColor = UIColor.black.withAlphaComponent(0.44)
+        videoPlayBadge.layer.cornerRadius = 23
+        videoPlayBadge.isUserInteractionEnabled = false
+
+        videoPlayIcon.translatesAutoresizingMaskIntoConstraints = false
+        videoPlayIcon.image = UIImage(
+            systemName: "play.fill",
+            withConfiguration: UIImage.SymbolConfiguration(pointSize: 18, weight: .bold)
+        )
+        videoPlayIcon.tintColor = .white
+        videoPlayIcon.contentMode = .scaleAspectFit
+
+        videoDurationLabel.translatesAutoresizingMaskIntoConstraints = false
+        videoDurationLabel.backgroundColor = UIColor.black.withAlphaComponent(0.58)
+        videoDurationLabel.layer.cornerRadius = 8
+        videoDurationLabel.clipsToBounds = true
+        videoDurationLabel.textColor = .white
+        videoDurationLabel.font = UIFont.monospacedDigitSystemFont(ofSize: 10, weight: .bold)
+        videoDurationLabel.textAlignment = .center
+        videoDurationLabel.isHidden = true
+
+        videoNameLabel.translatesAutoresizingMaskIntoConstraints = false
+        videoNameLabel.font = UIFont.systemFont(ofSize: 12, weight: .semibold)
+        videoNameLabel.textColor = ChitChatColors.textPrimary
+        videoNameLabel.numberOfLines = 1
+        videoNameLabel.lineBreakMode = .byTruncatingMiddle
+        videoNameLabel.isHidden = true
 
         captionLabel.translatesAutoresizingMaskIntoConstraints = false
         captionLabel.textColor = ChitChatColors.textPrimary
@@ -416,6 +454,11 @@ final class MessageBubbleCell: UITableViewCell {
         replyPreviewView.addSubview(replySummaryLabel)
         bubbleView.addSubview(messageLabel)
         bubbleView.addSubview(mediaImageView)
+        bubbleView.addSubview(videoSurfaceView)
+        videoSurfaceView.addSubview(videoPlayBadge)
+        videoPlayBadge.addSubview(videoPlayIcon)
+        videoSurfaceView.addSubview(videoDurationLabel)
+        bubbleView.addSubview(videoNameLabel)
         bubbleView.addSubview(captionLabel)
         bubbleView.addSubview(documentIconWrap)
         documentIconWrap.addSubview(documentIcon)
@@ -483,6 +526,21 @@ final class MessageBubbleCell: UITableViewCell {
             documentIcon.centerYAnchor.constraint(equalTo: documentIconWrap.centerYAnchor),
             documentIcon.widthAnchor.constraint(equalToConstant: 22),
             documentIcon.heightAnchor.constraint(equalToConstant: 22),
+
+            videoPlayBadge.centerXAnchor.constraint(equalTo: videoSurfaceView.centerXAnchor),
+            videoPlayBadge.centerYAnchor.constraint(equalTo: videoSurfaceView.centerYAnchor),
+            videoPlayBadge.widthAnchor.constraint(equalToConstant: 46),
+            videoPlayBadge.heightAnchor.constraint(equalToConstant: 46),
+
+            videoPlayIcon.centerXAnchor.constraint(equalTo: videoPlayBadge.centerXAnchor, constant: 1),
+            videoPlayIcon.centerYAnchor.constraint(equalTo: videoPlayBadge.centerYAnchor),
+            videoPlayIcon.widthAnchor.constraint(equalToConstant: 18),
+            videoPlayIcon.heightAnchor.constraint(equalToConstant: 18),
+
+            videoDurationLabel.trailingAnchor.constraint(equalTo: videoSurfaceView.trailingAnchor, constant: -9),
+            videoDurationLabel.bottomAnchor.constraint(equalTo: videoSurfaceView.bottomAnchor, constant: -9),
+            videoDurationLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: 36),
+            videoDurationLabel.heightAnchor.constraint(equalToConstant: 18),
 
             reactionLabel.topAnchor.constraint(equalTo: reactionPill.topAnchor, constant: 3),
             reactionLabel.leadingAnchor.constraint(equalTo: reactionPill.leadingAnchor, constant: 8),
@@ -579,6 +637,8 @@ final class MessageBubbleCell: UITableViewCell {
             configureText(message, isOutgoing: isOutgoing)
         } else if message.type == .image, let attachment = message.primaryAttachment, !attachment.url.isEmpty {
             configureImage(message, attachment: attachment, isOutgoing: isOutgoing)
+        } else if message.type == .video, let attachment = message.primaryAttachment {
+            configureVideo(message, attachment: attachment, isOutgoing: isOutgoing)
         } else if message.type == .document, let attachment = message.primaryAttachment {
             configureDocument(message, attachment: attachment, isOutgoing: isOutgoing)
         } else if (message.type == .voice || message.type == .audio),
@@ -797,6 +857,46 @@ final class MessageBubbleCell: UITableViewCell {
         NSLayoutConstraint.activate(activeLayoutConstraints)
     }
 
+    private func configureVideo(_ message: Message, attachment: MessageAttachment, isOutgoing: Bool) {
+        videoSurfaceView.isHidden = false
+        videoDurationLabel.isHidden = false
+        videoNameLabel.isHidden = false
+        bubbleView.configure(isOutgoing: isOutgoing)
+
+        videoNameLabel.text = ChatDetailFileFormatter.displayName(
+            from: attachment.fileName ?? "Video",
+            mimeType: attachment.mimeType
+        )
+        videoDurationLabel.text = Self.videoDuration(attachment.duration ?? 0)
+
+        let videoWidth = videoSurfaceView.widthAnchor.constraint(equalToConstant: 268)
+        videoWidth.priority = .defaultHigh
+        activeLayoutConstraints = [
+            bubbleView.widthAnchor.constraint(greaterThanOrEqualToConstant: 220),
+
+            contentTopConstraint(for: videoSurfaceView, defaultConstant: 0),
+            videoSurfaceView.leadingAnchor.constraint(equalTo: bubbleView.leadingAnchor),
+            videoSurfaceView.trailingAnchor.constraint(equalTo: bubbleView.trailingAnchor),
+            videoWidth,
+            videoSurfaceView.heightAnchor.constraint(equalToConstant: 168),
+
+            videoNameLabel.topAnchor.constraint(equalTo: videoSurfaceView.bottomAnchor, constant: 8),
+            videoNameLabel.leadingAnchor.constraint(equalTo: bubbleView.leadingAnchor, constant: 12),
+            videoNameLabel.trailingAnchor.constraint(equalTo: bubbleView.trailingAnchor, constant: -12),
+            videoNameLabel.heightAnchor.constraint(equalToConstant: 16),
+
+            timeLabel.topAnchor.constraint(equalTo: videoNameLabel.bottomAnchor, constant: 4),
+            timeLabel.leadingAnchor.constraint(
+                greaterThanOrEqualTo: bubbleView.leadingAnchor,
+                constant: ChitChatSpacing.chatDetailBubbleHorizontal
+            ),
+            timeLabel.heightAnchor.constraint(equalToConstant: 13),
+            timeLabel.bottomAnchor.constraint(equalTo: bubbleView.bottomAnchor, constant: -10),
+            readView.centerYAnchor.constraint(equalTo: timeLabel.centerYAnchor)
+        ]
+        NSLayoutConstraint.activate(activeLayoutConstraints)
+    }
+
     private func configureDocument(_ message: Message, attachment: MessageAttachment, isOutgoing: Bool) {
         documentIconWrap.isHidden = false
         documentNameLabel.isHidden = false
@@ -945,6 +1045,11 @@ final class MessageBubbleCell: UITableViewCell {
         return "\(value / 60):\(String(format: "%02d", value % 60))"
     }
 
+    private static func videoDuration(_ seconds: TimeInterval) -> String {
+        let value = max(0, Int(seconds.rounded()))
+        return "\(value / 60):\(String(format: "%02d", value % 60))"
+    }
+
     private func documentTypeLabel(fileName: String?, mimeType: String?) -> String {
         let extensionValue = fileName.flatMap {
             URL(fileURLWithPath: $0).pathExtension.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -962,6 +1067,9 @@ final class MessageBubbleCell: UITableViewCell {
         [
             messageLabel,
             mediaImageView,
+            videoSurfaceView,
+            videoDurationLabel,
+            videoNameLabel,
             captionLabel,
             documentIconWrap,
             documentNameLabel,

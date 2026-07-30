@@ -71,6 +71,7 @@
 		L30000000000000000000001 /* ActiveSessionsViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = L30000000000000000000021 /* ActiveSessionsViewController.swift */; };
 		M40000000000000000000001 /* VoiceNoteAudioController.swift in Sources */ = {isa = PBXBuildFile; fileRef = M40000000000000000000021 /* VoiceNoteAudioController.swift */; };
 		M40000000000000000000002 /* VoiceNoteComposerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = M40000000000000000000022 /* VoiceNoteComposerView.swift */; };
+		N50000000000000000000001 /* VideoMessagePreviewViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = N50000000000000000000021 /* VideoMessagePreviewViewController.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -138,6 +139,7 @@
 		L30000000000000000000021 /* ActiveSessionsViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActiveSessionsViewController.swift; sourceTree = "<group>"; };
 		M40000000000000000000021 /* VoiceNoteAudioController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceNoteAudioController.swift; sourceTree = "<group>"; };
 		M40000000000000000000022 /* VoiceNoteComposerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceNoteComposerView.swift; sourceTree = "<group>"; };
+		N50000000000000000000021 /* VideoMessagePreviewViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VideoMessagePreviewViewController.swift; sourceTree = "<group>"; };
 		J10000000000000000000025 /* ChitChatIOS.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ChitChatIOS.entitlements; sourceTree = "<group>"; };
 		J10000000000000000000026 /* ChitChatIOS.Release.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ChitChatIOS.Release.entitlements; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -267,6 +269,7 @@
 				L30000000000000000000021 /* ActiveSessionsViewController.swift */,
 				M40000000000000000000021 /* VoiceNoteAudioController.swift */,
 				M40000000000000000000022 /* VoiceNoteComposerView.swift */,
+				N50000000000000000000021 /* VideoMessagePreviewViewController.swift */,
 			);
 			path = Screens;
 			sourceTree = "<group>";
@@ -421,6 +424,7 @@
 				L30000000000000000000001 /* ActiveSessionsViewController.swift in Sources */,
 				M40000000000000000000001 /* VoiceNoteAudioController.swift in Sources */,
 				M40000000000000000000002 /* VoiceNoteComposerView.swift in Sources */,
+				N50000000000000000000001 /* VideoMessagePreviewViewController.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
