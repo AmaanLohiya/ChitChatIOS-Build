@@ -583,6 +583,74 @@ private final class DocumentPreviewDataSource: NSObject, QLPreviewControllerData
     }
 }
 
+private enum ChatTimelineRow {
+    case dateSeparator(id: String, label: String)
+    case message(Message)
+}
+
+private final class ChatDateSeparatorCell: UITableViewCell {
+    static let reuseIdentifier = "ChatDateSeparatorCell"
+
+    private let pillView = UIView()
+    private let titleLabel = UILabel()
+
+    override init(style: UITableViewCell.CellStyle, reuseIdentifier: String?) {
+        super.init(style: style, reuseIdentifier: reuseIdentifier)
+        selectionStyle = .none
+        backgroundColor = .clear
+        contentView.backgroundColor = .clear
+
+        pillView.translatesAutoresizingMaskIntoConstraints = false
+        pillView.layer.cornerRadius = 12
+        pillView.layer.borderWidth = 1
+
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+        titleLabel.font = UIFont.systemFont(ofSize: 11, weight: .semibold)
+        titleLabel.textAlignment = .center
+        titleLabel.numberOfLines = 1
+        titleLabel.adjustsFontSizeToFitWidth = true
+        titleLabel.minimumScaleFactor = 0.9
+
+        contentView.addSubview(pillView)
+        pillView.addSubview(titleLabel)
+        NSLayoutConstraint.activate([
+            pillView.centerXAnchor.constraint(equalTo: contentView.centerXAnchor),
+            pillView.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 6),
+            pillView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -6),
+            pillView.heightAnchor.constraint(greaterThanOrEqualToConstant: 24),
+            pillView.leadingAnchor.constraint(greaterThanOrEqualTo: contentView.leadingAnchor, constant: 24),
+            pillView.trailingAnchor.constraint(lessThanOrEqualTo: contentView.trailingAnchor, constant: -24),
+
+            titleLabel.leadingAnchor.constraint(equalTo: pillView.leadingAnchor, constant: 12),
+            titleLabel.trailingAnchor.constraint(equalTo: pillView.trailingAnchor, constant: -12),
+            titleLabel.topAnchor.constraint(equalTo: pillView.topAnchor, constant: 4),
+            titleLabel.bottomAnchor.constraint(equalTo: pillView.bottomAnchor, constant: -4)
+        ])
+        updateColors()
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+        super.traitCollectionDidChange(previousTraitCollection)
+        guard traitCollection.hasDifferentColorAppearance(comparedTo: previousTraitCollection) else { return }
+        updateColors()
+    }
+
+    func configure(label: String) {
+        titleLabel.text = label
+        accessibilityLabel = label
+    }
+
+    private func updateColors() {
+        pillView.backgroundColor = ChitChatColors.surface
+        pillView.layer.borderColor = ChitChatColors.border.resolvedColor(with: traitCollection).cgColor
+        titleLabel.textColor = ChitChatColors.textMuted
+    }
+}
+
 final class ChatDetailViewController: BaseViewController {
     var notificationChatID: String { chat.id }
     private static let quickReactions = ["👍", "❤️", "😂", "😮", "😢", "🙏"]
@@ -602,6 +670,7 @@ final class ChatDetailViewController: BaseViewController {
     private let onlineDot = UIView()
     private let statusLabel = UILabel()
     private let tableView = UITableView(frame: .zero, style: .plain)
+    private let scrollToBottomButton = UIButton(type: .system)
     private let olderMessagesHeader = UIView()
     private let olderMessagesSpinner = UIActivityIndicatorView(style: .medium)
     private let olderMessagesRetryButton = UIButton(type: .system)
@@ -616,7 +685,11 @@ final class ChatDetailViewController: BaseViewController {
     private let voiceNotePlayback = VoiceNotePlaybackCoordinator()
 
     private var stateOverlay: UIView?
-    private var messages: [Message] = []
+    private var messages: [Message] = [] {
+        didSet { timelineRows = Self.makeTimelineRows(messages) }
+    }
+    private var timelineRows: [ChatTimelineRow] = []
+    private var newMessageCount = 0
     private var pendingSends: [String: PendingMessageSend] = [:]
     private var animatedMessageIDs = Set<String>()
     private var loadTask: Task<Void, Never>?
@@ -983,6 +1056,72 @@ final class ChatDetailViewController: BaseViewController {
         value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     }
 
+    private static func makeTimelineRows(_ messages: [Message], now: Date = Date()) -> [ChatTimelineRow] {
+        var rows: [ChatTimelineRow] = []
+        var previousDayKey: String?
+
+        for message in messages {
+            if let date = ChitChatDateFormatter.date(from: message.createdAt) {
+                let dayKey = localDayKey(for: date)
+                if dayKey != previousDayKey {
+                    rows.append(
+                        .dateSeparator(
+                            id: "date:\(dayKey)",
+                            label: timelineDateLabel(for: date, now: now)
+                        )
+                    )
+                    previousDayKey = dayKey
+                }
+            }
+            rows.append(.message(message))
+        }
+
+        return rows
+    }
+
+    private static func localDayKey(for date: Date) -> String {
+        let components = Calendar.autoupdatingCurrent.dateComponents([.year, .month, .day], from: date)
+        return String(
+            format: "%04d-%02d-%02d",
+            components.year ?? 0,
+            components.month ?? 0,
+            components.day ?? 0
+        )
+    }
+
+    private static func timelineDateLabel(for date: Date, now: Date) -> String {
+        let calendar = Calendar.autoupdatingCurrent
+        if calendar.isDateInToday(date) { return "Today" }
+        if calendar.isDateInYesterday(date) { return "Yesterday" }
+
+        let messageDay = calendar.startOfDay(for: date)
+        let today = calendar.startOfDay(for: now)
+        let dayDistance = calendar.dateComponents([.day], from: messageDay, to: today).day ?? .max
+        let formatter = DateFormatter()
+        formatter.locale = .autoupdatingCurrent
+        formatter.timeZone = .autoupdatingCurrent
+        if (2...6).contains(dayDistance) {
+            formatter.setLocalizedDateFormatFromTemplate("EEEE MMMd")
+        } else {
+            formatter.dateStyle = .medium
+            formatter.timeStyle = .none
+        }
+        return formatter.string(from: date)
+    }
+
+    private func message(at indexPath: IndexPath) -> Message? {
+        guard timelineRows.indices.contains(indexPath.row) else { return nil }
+        guard case let .message(message) = timelineRows[indexPath.row] else { return nil }
+        return message
+    }
+
+    private func timelineIndex(forClientSendID clientSendID: String) -> Int? {
+        timelineRows.firstIndex { row in
+            guard case let .message(message) = row else { return false }
+            return message.clientSendId == clientSendID
+        }
+    }
+
     private func configureTable() {
         tableView.translatesAutoresizingMaskIntoConstraints = false
         tableView.backgroundColor = ChitChatColors.chatDetailScreen
@@ -1004,6 +1143,10 @@ final class ChatDetailViewController: BaseViewController {
         tableView.register(
             MessageBubbleCell.self,
             forCellReuseIdentifier: MessageBubbleCell.reuseIdentifier
+        )
+        tableView.register(
+            ChatDateSeparatorCell.self,
+            forCellReuseIdentifier: ChatDateSeparatorCell.reuseIdentifier
         )
         configureOlderMessagesHeader()
         let longPress = UILongPressGestureRecognizer(
@@ -1067,6 +1210,69 @@ final class ChatDetailViewController: BaseViewController {
         tableView.tableHeaderView = olderMessagesHeader
         isLoading ? olderMessagesSpinner.startAnimating() : olderMessagesSpinner.stopAnimating()
         olderMessagesRetryButton.isHidden = !showsRetry
+    }
+
+    private func configureScrollToBottomButton() {
+        scrollToBottomButton.translatesAutoresizingMaskIntoConstraints = false
+        scrollToBottomButton.isHidden = true
+        scrollToBottomButton.accessibilityLabel = "Scroll to bottom"
+        scrollToBottomButton.titleLabel?.font = UIFont.systemFont(ofSize: 11, weight: .semibold)
+        scrollToBottomButton.titleLabel?.numberOfLines = 1
+        scrollToBottomButton.titleLabel?.lineBreakMode = .byTruncatingTail
+        scrollToBottomButton.titleLabel?.adjustsFontSizeToFitWidth = true
+        scrollToBottomButton.titleLabel?.minimumScaleFactor = 0.85
+        scrollToBottomButton.layer.shadowColor = UIColor.black.cgColor
+        scrollToBottomButton.layer.shadowOpacity = 0.2
+        scrollToBottomButton.layer.shadowRadius = 5
+        scrollToBottomButton.layer.shadowOffset = CGSize(width: 0, height: 2)
+        scrollToBottomButton.addTarget(
+            self,
+            action: #selector(scrollToBottomTapped),
+            for: .touchUpInside
+        )
+        scrollToBottomButton.setContentHuggingPriority(.required, for: .horizontal)
+        view.addSubview(scrollToBottomButton)
+        NSLayoutConstraint.activate([
+            scrollToBottomButton.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -14),
+            scrollToBottomButton.bottomAnchor.constraint(equalTo: tableView.bottomAnchor, constant: -12),
+            scrollToBottomButton.heightAnchor.constraint(equalToConstant: 42),
+            scrollToBottomButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 42),
+            scrollToBottomButton.widthAnchor.constraint(lessThanOrEqualToConstant: 180),
+            scrollToBottomButton.leadingAnchor.constraint(greaterThanOrEqualTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 14)
+        ])
+        updateScrollToBottomControl()
+    }
+
+    private func updateScrollToBottomControl() {
+        let shouldShow = hasPositionedInitialMessages && !messages.isEmpty && !isNearBottom
+        scrollToBottomButton.isHidden = !shouldShow
+        guard shouldShow else { return }
+
+        var configuration = UIButton.Configuration.filled()
+        configuration.cornerStyle = .capsule
+        configuration.baseForegroundColor = ChitChatColors.accent
+        configuration.background.backgroundColor = ChitChatColors.surface
+        configuration.background.strokeColor = ChitChatColors.border
+        configuration.background.strokeWidth = 1
+        configuration.image = UIImage(
+            systemName: "arrow.down",
+            withConfiguration: UIImage.SymbolConfiguration(pointSize: 15, weight: .semibold)
+        )
+        configuration.imagePadding = newMessageCount > 0 ? 6 : 0
+        configuration.contentInsets = NSDirectionalEdgeInsets(top: 7, leading: 12, bottom: 7, trailing: 12)
+        if newMessageCount > 0 {
+            configuration.title = newMessageCount == 1
+                ? "1 new message"
+                : "\(newMessageCount) new messages"
+        }
+        scrollToBottomButton.configuration = configuration
+        scrollToBottomButton.accessibilityLabel = newMessageCount > 0
+            ? "\(newMessageCount) new \(newMessageCount == 1 ? "message" : "messages"). Scroll to bottom."
+            : "Scroll to bottom"
+    }
+
+    @objc private func scrollToBottomTapped() {
+        scrollToBottom(animated: true)
     }
 
     private func configureInputBar() {
@@ -1156,6 +1362,7 @@ final class ChatDetailViewController: BaseViewController {
         view.addSubview(composerContextView)
         view.addSubview(voiceNoteComposer)
         view.addSubview(inputBar)
+        configureScrollToBottomButton()
         composerContextView.addSubview(composerContextAccent)
         composerContextView.addSubview(composerContextTitle)
         composerContextView.addSubview(composerContextSummary)
@@ -1387,10 +1594,9 @@ final class ChatDetailViewController: BaseViewController {
         }
         for indexPath in tableView.indexPathsForVisibleRows ?? [] {
             guard
-                indexPath.row < messages.count,
+                let message = message(at: indexPath),
                 let cell = tableView.cellForRow(at: indexPath) as? MessageBubbleCell
             else { continue }
-            let message = messages[indexPath.row]
             guard message.type == .voice || message.type == .audio else { continue }
             let duration = message.primaryAttachment?.duration ?? 0
             let cellState = state.sourceID == message.id
@@ -1438,6 +1644,7 @@ final class ChatDetailViewController: BaseViewController {
                     if wasLoaded {
                         page.values.forEach { self.mergeAuthoritativeMessage($0) }
                     } else {
+                        self.newMessageCount = 0
                         let localPendingMessages = self.messages.filter {
                             guard let clientSendId = $0.clientSendId else { return false }
                             return self.pendingSends[clientSendId] != nil
@@ -1461,6 +1668,7 @@ final class ChatDetailViewController: BaseViewController {
                     self.updateOlderMessagesHeader(isLoading: false, showsRetry: false)
                     self.hasLoaded = true
                     self.tableView.reloadData()
+                    self.updateScrollToBottomControl()
                     self.tableView.refreshControl?.endRefreshing()
                     self.loadTask = nil
 
@@ -1828,7 +2036,7 @@ final class ChatDetailViewController: BaseViewController {
     }
 
     private func reloadPendingMessage(_ clientSendId: String) {
-        guard let index = messages.firstIndex(where: { $0.clientSendId == clientSendId }) else {
+        guard let index = timelineIndex(forClientSendID: clientSendId) else {
             return
         }
         tableView.reloadRows(at: [IndexPath(row: index, section: 0)], with: .none)
@@ -1978,6 +2186,7 @@ final class ChatDetailViewController: BaseViewController {
 
         messages.sort(by: sortMessages)
         tableView.reloadData()
+        updateScrollToBottomControl()
         if messages.isEmpty {
             showMessageState(
                 title: "No messages yet",
@@ -2300,10 +2509,9 @@ final class ChatDetailViewController: BaseViewController {
         let point = gesture.location(in: tableView)
         guard
             let indexPath = tableView.indexPathForRow(at: point),
-            messages.indices.contains(indexPath.row)
+            let message = message(at: indexPath)
         else { return }
 
-        let message = messages[indexPath.row]
         guard
             !message.isDeletedForEveryone,
             !message.isDeletedForMe,
@@ -2769,8 +2977,8 @@ final class ChatDetailViewController: BaseViewController {
 
     private var visibleMessageIDs: Set<String> {
         Set((tableView.indexPathsForVisibleRows ?? []).compactMap { indexPath in
-            guard messages.indices.contains(indexPath.row) else { return nil }
-            return normalizedMessageID(messages[indexPath.row].id)
+            guard let message = message(at: indexPath) else { return nil }
+            return normalizedMessageID(message.id)
         })
     }
 
@@ -2854,6 +3062,7 @@ final class ChatDetailViewController: BaseViewController {
                     self.hasMoreMessages = page.hasMore
                     self.updateOlderMessagesHeader(isLoading: false, showsRetry: false)
                     self.tableView.reloadData()
+                    self.updateScrollToBottomControl()
                     self.tableView.layoutIfNeeded()
                     let heightDelta = self.tableView.contentSize.height - previousContentHeight
                     let minimumOffset = -self.tableView.adjustedContentInset.top
@@ -2864,6 +3073,7 @@ final class ChatDetailViewController: BaseViewController {
                         ),
                         animated: false
                     )
+                    self.updateScrollToBottomControl()
                     self.olderMessagesTask = nil
                 }
             } catch {
@@ -3053,6 +3263,9 @@ final class ChatDetailViewController: BaseViewController {
 
         if shouldFollow {
             scrollToBottom(animated: true)
+        } else {
+            newMessageCount += 1
+            updateScrollToBottomControl()
         }
         DispatchQueue.main.async { [weak self] in
             self?.markVisibleIncomingMessagesRead()
@@ -3073,10 +3286,12 @@ final class ChatDetailViewController: BaseViewController {
     }
 
     private func scrollToBottom(animated: Bool) {
-        guard !messages.isEmpty else { return }
+        guard !timelineRows.isEmpty else { return }
+        newMessageCount = 0
+        scrollToBottomButton.isHidden = true
         DispatchQueue.main.async {
             self.tableView.scrollToRow(
-                at: IndexPath(row: self.messages.count - 1, section: 0),
+                at: IndexPath(row: self.timelineRows.count - 1, section: 0),
                 at: .bottom,
                 animated: animated
             )
@@ -3249,17 +3464,29 @@ final class ChatDetailViewController: BaseViewController {
 
 extension ChatDetailViewController: UITableViewDataSource, UITableViewDelegate {
     func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
-        messages.count
+        timelineRows.count
     }
 
     func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
+        guard timelineRows.indices.contains(indexPath.row) else { return UITableViewCell() }
+        if case let .dateSeparator(_, label) = timelineRows[indexPath.row] {
+            guard let cell = tableView.dequeueReusableCell(
+                withIdentifier: ChatDateSeparatorCell.reuseIdentifier,
+                for: indexPath
+            ) as? ChatDateSeparatorCell else {
+                return UITableViewCell()
+            }
+            cell.configure(label: label)
+            return cell
+        }
+
         guard let cell = tableView.dequeueReusableCell(
             withIdentifier: MessageBubbleCell.reuseIdentifier,
             for: indexPath
         ) as? MessageBubbleCell else {
             return UITableViewCell()
         }
-        let message = messages[indexPath.row]
+        guard let message = message(at: indexPath) else { return UITableViewCell() }
         let localSendState = message.clientSendId.flatMap { pendingSends[$0]?.state }
         let localSendLabel: String? = message.clientSendId.flatMap { clientSendId in
             guard let pending = pendingSends[clientSendId], pending.state == .sending else { return nil }
@@ -3309,7 +3536,8 @@ extension ChatDetailViewController: UITableViewDataSource, UITableViewDelegate {
     }
 
     func tableView(_ tableView: UITableView, willDisplay cell: UITableViewCell, forRowAt indexPath: IndexPath) {
-        let messageID = messages[indexPath.row].id
+        guard let message = message(at: indexPath) else { return }
+        let messageID = message.id
         DispatchQueue.main.async { [weak self] in
             self?.markVisibleIncomingMessagesRead()
         }
@@ -3330,6 +3558,10 @@ extension ChatDetailViewController: UITableViewDataSource, UITableViewDelegate {
 
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
         guard scrollView === tableView, hasPositionedInitialMessages else { return }
+        if isNearBottom, newMessageCount > 0 {
+            newMessageCount = 0
+        }
+        updateScrollToBottomControl()
         let topThreshold = -scrollView.adjustedContentInset.top + 80
         if scrollView.contentOffset.y <= topThreshold {
             loadOlderMessages()
@@ -3338,7 +3570,8 @@ extension ChatDetailViewController: UITableViewDataSource, UITableViewDelegate {
 
     func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         tableView.deselectRow(at: indexPath, animated: false)
-        openMediaMessage(messages[indexPath.row])
+        guard let message = message(at: indexPath) else { return }
+        openMediaMessage(message)
     }
 }
 
