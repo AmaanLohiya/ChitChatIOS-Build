@@ -338,7 +338,8 @@ final class SocketService {
         text: String? = nil,
         attachments: [MessageAttachment]? = nil,
         replyToMessageId: String? = nil,
-        clientSendId: String? = nil
+        clientSendId: String? = nil,
+        location: MessageLocation? = nil
     ) async throws -> Message {
         let payload = try Self.messagePayload(
             chatId: chatId,
@@ -346,7 +347,8 @@ final class SocketService {
             text: text,
             attachments: attachments,
             replyToMessageId: replyToMessageId,
-            clientSendId: clientSendId
+            clientSendId: clientSendId,
+            location: location
         )
 
         return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Message, Error>) in
@@ -377,7 +379,8 @@ final class SocketService {
         text: String?,
         attachments: [MessageAttachment]?,
         replyToMessageId: String?,
-        clientSendId: String?
+        clientSendId: String?,
+        location: MessageLocation?
     ) throws -> [String: Any] {
         var payload: [String: Any] = [
             "chatId": chatId,
@@ -399,6 +402,12 @@ final class SocketService {
 
         if let clientSendId, !clientSendId.isEmpty {
             payload["clientSendId"] = clientSendId
+        }
+
+        if let location {
+            guard location.isValid else { throw SocketServiceError.invalidPayload }
+            let data = try JSONEncoder().encode(location)
+            payload["location"] = try JSONSerialization.jsonObject(with: data)
         }
 
         return payload

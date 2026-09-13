@@ -146,6 +146,42 @@ struct MessageReaction: Codable, Equatable {
     let createdAt: String
 }
 
+struct MessageLocation: Codable, Equatable {
+    let lat: Double
+    let lng: Double
+    let title: String?
+    let address: String?
+
+    var isValid: Bool {
+        lat.isFinite && lng.isFinite && (-90...90).contains(lat) && (-180...180).contains(lng)
+    }
+
+    var displayTitle: String { title?.isEmpty == false ? title ?? "Shared location" : "Shared location" }
+    var displayAddress: String {
+        if let address, !address.isEmpty { return address }
+        return String(format: "%.5f, %.5f", lat, lng)
+    }
+
+    init(lat: Double, lng: Double, title: String? = nil, address: String? = nil) {
+        self.lat = lat
+        self.lng = lng
+        self.title = title.map { String($0.trimmingCharacters(in: .whitespacesAndNewlines).prefix(120)) }
+        self.address = address.map { String($0.trimmingCharacters(in: .whitespacesAndNewlines).prefix(500)) }
+    }
+
+    enum CodingKeys: String, CodingKey { case lat, lng, title, address }
+
+    init(from decoder: Decoder) throws {
+        let values = try? decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            lat: (try? values?.decode(Double.self, forKey: .lat)) ?? .nan,
+            lng: (try? values?.decode(Double.self, forKey: .lng)) ?? .nan,
+            title: try? values?.decode(String.self, forKey: .title),
+            address: try? values?.decode(String.self, forKey: .address)
+        )
+    }
+}
+
 struct Message: Codable, Equatable {
     let id: String
     let chatId: String
@@ -165,6 +201,7 @@ struct Message: Codable, Equatable {
     let updatedAt: String
     let isDeletedForEveryone: Bool
     let isDeletedForMe: Bool
+    var location: MessageLocation? = nil
 
     static func pending(
         chatId: String,
@@ -174,7 +211,8 @@ struct Message: Codable, Equatable {
         text: String?,
         attachments: [MessageAttachment],
         replyToMessageId: String?,
-        createdAt: String
+        createdAt: String,
+        location: MessageLocation? = nil
     ) -> Message {
         Message(
             id: "local-\(clientSendId)",
@@ -194,7 +232,8 @@ struct Message: Codable, Equatable {
             createdAt: createdAt,
             updatedAt: createdAt,
             isDeletedForEveryone: false,
-            isDeletedForMe: false
+            isDeletedForMe: false,
+            location: location
         )
     }
 
@@ -229,6 +268,8 @@ struct Message: Codable, Equatable {
             return primaryAttachment?.fileName ?? "Document"
         case .voice, .audio:
             return "Voice message"
+        case .location:
+            return location?.isValid == true ? "Shared location" : "Unsupported location"
         default:
             return type.rawValue.capitalized
         }
@@ -246,19 +287,22 @@ struct CreateMessageRequest: Encodable {
     let text: String?
     let attachments: [MessageAttachment]?
     let replyToMessageId: String?
+    let location: MessageLocation?
 
     init(
         type: MessageType,
         text: String?,
         attachments: [MessageAttachment]?,
         replyToMessageId: String? = nil,
-        clientSendId: String? = nil
+        clientSendId: String? = nil,
+        location: MessageLocation? = nil
     ) {
         self.clientSendId = clientSendId
         self.type = type
         self.text = text
         self.attachments = attachments
         self.replyToMessageId = replyToMessageId
+        self.location = location
     }
 }
 
