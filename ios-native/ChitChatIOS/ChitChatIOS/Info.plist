@@ -55,7 +55,7 @@
     <key>NSCameraUsageDescription</key>
     <string>ChitChat uses the camera for profile photos, media messages, statuses, and video calls.</string>
     <key>NSContactsUsageDescription</key>
-    <string>ChitChat reads contact names and phone numbers to find people who already use ChitChat.</string>
+    <string>ChitChat reads contact names and phone numbers to find people who already use ChitChat and let you choose contacts to share.</string>
     <key>NSLocationWhenInUseUsageDescription</key>
     <string>ChitChat gets your current location only when you choose to share a location in a chat.</string>
     <key>NSMicrophoneUsageDescription</key>

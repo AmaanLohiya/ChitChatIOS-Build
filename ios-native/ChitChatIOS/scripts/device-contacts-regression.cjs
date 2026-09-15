@@ -48,8 +48,9 @@ assert.match(contactCell, /Saved contact -/);
 assert.match(session, /DeviceContactsService\(\)\.clearFingerprint\(for: userID\)/);
 assert.match(plist, /NSContactsUsageDescription/);
 assert.match(plist, /find people who already use ChitChat/);
+assert.match(plist, /choose contacts to share/);
 assert.equal((project.match(/DeviceContactsService\.swift \*\/ = \{isa = PBXFileReference/g) ?? []).length, 1);
 assert.equal((project.match(/DeviceContactsService\.swift in Sources \*\/ = \{isa = PBXBuildFile/g) ?? []).length, 1);
 assert.equal((project.match(/DeviceContactsService\.swift in Sources \*\//g) ?? []).length, 2);
 
-process.stdout.write('Native iOS device-contact regression checks passed: 27.\n');
+process.stdout.write('Native iOS device-contact regression checks passed: 28.\n');

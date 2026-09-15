@@ -73,6 +73,7 @@
 		M40000000000000000000002 /* VoiceNoteComposerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = M40000000000000000000022 /* VoiceNoteComposerView.swift */; };
 		C3E000000000000000000001 /* LocationMessageViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3E000000000000000000002 /* LocationMessageViewController.swift */; };
 		N50000000000000000000001 /* VideoMessagePreviewViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = N50000000000000000000021 /* VideoMessagePreviewViewController.swift */; };
+		O60000000000000000000001 /* ContactMessageViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = O60000000000000000000021 /* ContactMessageViewController.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -142,6 +143,7 @@
 		M40000000000000000000022 /* VoiceNoteComposerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceNoteComposerView.swift; sourceTree = "<group>"; };
 		C3E000000000000000000002 /* LocationMessageViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocationMessageViewController.swift; sourceTree = "<group>"; };
 		N50000000000000000000021 /* VideoMessagePreviewViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VideoMessagePreviewViewController.swift; sourceTree = "<group>"; };
+		O60000000000000000000021 /* ContactMessageViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContactMessageViewController.swift; sourceTree = "<group>"; };
 		J10000000000000000000025 /* ChitChatIOS.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ChitChatIOS.entitlements; sourceTree = "<group>"; };
 		J10000000000000000000026 /* ChitChatIOS.Release.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ChitChatIOS.Release.entitlements; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -273,6 +275,7 @@
 				M40000000000000000000022 /* VoiceNoteComposerView.swift */,
 				C3E000000000000000000002 /* LocationMessageViewController.swift */,
 				N50000000000000000000021 /* VideoMessagePreviewViewController.swift */,
+				O60000000000000000000021 /* ContactMessageViewController.swift */,
 			);
 			path = Screens;
 			sourceTree = "<group>";
@@ -429,6 +432,7 @@
 				M40000000000000000000002 /* VoiceNoteComposerView.swift in Sources */,
 				C3E000000000000000000001 /* LocationMessageViewController.swift in Sources */,
 				N50000000000000000000001 /* VideoMessagePreviewViewController.swift in Sources */,
+				O60000000000000000000001 /* ContactMessageViewController.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

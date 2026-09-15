@@ -2135,7 +2135,8 @@ final class ChatDetailViewController: BaseViewController {
                     attachments: request.attachments,
                     replyToMessageId: request.replyToMessageId,
                     clientSendId: request.clientSendId,
-                    location: request.location
+                    location: request.location,
+                    contact: request.contact
                 )
             } catch {
                 return try await messageService.sendMessage(chatId: chat.id, request: request)
@@ -2214,6 +2215,9 @@ final class ChatDetailViewController: BaseViewController {
         sheet.addAction(UIAlertAction(title: "Location", style: .default) { [weak self] _ in
             self?.presentLocationPreview()
         })
+        sheet.addAction(UIAlertAction(title: "Contact", style: .default) { [weak self] _ in
+            self?.presentContactPreview()
+        })
         sheet.addAction(UIAlertAction(title: "Cancel", style: .cancel))
         sheet.popoverPresentationController?.sourceView = inputBar
         sheet.popoverPresentationController?.sourceRect = inputBar.bounds
@@ -2238,6 +2242,31 @@ final class ChatDetailViewController: BaseViewController {
                 clientSendId: clientSendId, type: .location, text: nil, attachments: [],
                 replyToMessageId: self.replyToMessageID,
                 createdAt: ISO8601DateFormatter().string(from: Date()), location: location
+            )
+            self.enqueuePendingMessage(pending, payload: .ready(request), usesMediaTask: false)
+            self.clearComposerContextState(restoreDraft: false)
+        }
+        present(UINavigationController(rootViewController: controller), animated: true)
+    }
+
+    private func presentContactPreview() {
+        guard sendTask == nil, mediaTask == nil, editingMessageID == nil else { return }
+        let controller = ContactMessageViewController()
+        controller.onSend = { [weak self] contact in
+            guard let self, self.viewIfLoaded?.window != nil,
+                  SessionManager.shared.authenticatedUser?.id == self.currentUser.id,
+                  self.sendTask == nil, self.mediaTask == nil, contact.isValid else { return }
+            let clientSendId = "ios-\(UUID().uuidString.lowercased())"
+            let request = CreateMessageRequest(
+                type: .contact, text: nil, attachments: nil,
+                replyToMessageId: self.replyToMessageID, clientSendId: clientSendId,
+                contact: contact
+            )
+            let pending = Message.pending(
+                chatId: self.chat.id, senderId: self.currentUser.id,
+                clientSendId: clientSendId, type: .contact, text: contact.displayName, attachments: [],
+                replyToMessageId: self.replyToMessageID,
+                createdAt: ISO8601DateFormatter().string(from: Date()), contact: contact
             )
             self.enqueuePendingMessage(pending, payload: .ready(request), usesMediaTask: false)
             self.clearComposerContextState(restoreDraft: false)
@@ -2397,6 +2426,12 @@ final class ChatDetailViewController: BaseViewController {
         if message.type == .location, !message.isDeletedForEveryone {
             if !LocationMessageCardView.openMaps(message.location) {
                 showAlert(message: "This location could not be opened in Maps.")
+            }
+            return
+        }
+        if message.type == .contact, !message.isDeletedForEveryone {
+            if !ContactMessageCardView.presentActions(for: message.contact, from: self) {
+                showAlert(message: "This contact card is unavailable.")
             }
             return
         }
@@ -2934,6 +2969,8 @@ final class ChatDetailViewController: BaseViewController {
             return "Video"
         case .audio, .voice:
             return "Voice message"
+        case .contact:
+            return message.contact?.isValid == true ? message.contact?.displayName ?? "Shared contact" : "Unsupported contact"
         default:
             let displayText = message.displayText.trimmingCharacters(in: .whitespacesAndNewlines)
             return displayText.isEmpty ? "Message" : displayText

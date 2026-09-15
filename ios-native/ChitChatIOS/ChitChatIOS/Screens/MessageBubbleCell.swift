@@ -222,6 +222,7 @@ final class MessageBubbleCell: UITableViewCell {
 
     private let bubbleView = MessageBubbleBackgroundView()
     private let locationCard = LocationMessageCardView()
+    private let contactCard = ContactMessageCardView()
     private let replyPreviewView = UIView()
     private let replyAccentView = UIView()
     private let replySenderLabel = UILabel()
@@ -455,6 +456,7 @@ final class MessageBubbleCell: UITableViewCell {
         replyPreviewView.addSubview(replySummaryLabel)
         bubbleView.addSubview(messageLabel)
         bubbleView.addSubview(locationCard)
+        bubbleView.addSubview(contactCard)
         bubbleView.addSubview(mediaImageView)
         bubbleView.addSubview(videoSurfaceView)
         videoSurfaceView.addSubview(videoPlayBadge)
@@ -645,6 +647,8 @@ final class MessageBubbleCell: UITableViewCell {
             configureDocument(message, attachment: attachment, isOutgoing: isOutgoing)
         } else if message.type == .location {
             configureLocation(message, isOutgoing: isOutgoing)
+        } else if message.type == .contact {
+            configureContact(message, isOutgoing: isOutgoing)
         } else if (message.type == .voice || message.type == .audio),
                   let attachment = message.primaryAttachment {
             configureVoice(
@@ -920,6 +924,25 @@ final class MessageBubbleCell: UITableViewCell {
         NSLayoutConstraint.activate(activeLayoutConstraints)
     }
 
+    private func configureContact(_ message: Message, isOutgoing: Bool) {
+        contactCard.configure(message.contact)
+        contactCard.isHidden = false
+        bubbleView.configure(isOutgoing: isOutgoing, radius: 20)
+        let width = bubbleView.widthAnchor.constraint(equalToConstant: 254)
+        width.priority = .defaultHigh
+        activeLayoutConstraints = [
+            width,
+            contentTopConstraint(for: contactCard, defaultConstant: 0),
+            contactCard.leadingAnchor.constraint(equalTo: bubbleView.leadingAnchor),
+            contactCard.trailingAnchor.constraint(equalTo: bubbleView.trailingAnchor),
+            timeLabel.topAnchor.constraint(equalTo: contactCard.bottomAnchor),
+            timeLabel.heightAnchor.constraint(equalToConstant: 13),
+            timeLabel.bottomAnchor.constraint(equalTo: bubbleView.bottomAnchor, constant: -10),
+            readView.centerYAnchor.constraint(equalTo: timeLabel.centerYAnchor)
+        ]
+        NSLayoutConstraint.activate(activeLayoutConstraints)
+    }
+
     private func configureDocument(_ message: Message, attachment: MessageAttachment, isOutgoing: Bool) {
         documentIconWrap.isHidden = false
         documentNameLabel.isHidden = false
@@ -1089,6 +1112,7 @@ final class MessageBubbleCell: UITableViewCell {
     private func resetContentVisibility() {
         [
             locationCard,
+            contactCard,
             messageLabel,
             mediaImageView,
             videoSurfaceView,

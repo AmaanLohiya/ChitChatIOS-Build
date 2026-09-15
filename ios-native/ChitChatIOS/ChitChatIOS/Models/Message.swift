@@ -182,6 +182,97 @@ struct MessageLocation: Codable, Equatable {
     }
 }
 
+struct MessageContactPhone: Codable, Equatable {
+    let label: String?
+    let number: String
+
+    var isValid: Bool {
+        let value = number.trimmingCharacters(in: .whitespacesAndNewlines)
+        return value.count >= 3 && value.count <= 40
+    }
+
+    init(label: String? = nil, number: String) {
+        let trimmedLabel = label?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let trimmedLabel, !trimmedLabel.isEmpty {
+            self.label = String(trimmedLabel.prefix(32))
+        } else {
+            self.label = nil
+        }
+        self.number = String(number.trimmingCharacters(in: .whitespacesAndNewlines).prefix(40))
+    }
+}
+
+struct MessageContact: Codable, Equatable {
+    let displayName: String
+    let phones: [MessageContactPhone]
+    let organization: String?
+
+    var isValid: Bool {
+        !displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !phones.isEmpty
+            && phones.allSatisfy(\.isValid)
+    }
+
+    var primaryPhoneNumber: String {
+        phones.first?.number ?? "No phone number"
+    }
+
+    var phoneSummary: String {
+        guard let first = phones.first else { return "No phone number" }
+        let extraCount = max(0, phones.count - 1)
+        return extraCount > 0 ? "\(first.number) +\(extraCount) more" : first.number
+    }
+
+    var initials: String {
+        let parts = displayName.split(separator: " ")
+        guard let first = parts.first?.first else { return "C" }
+        let second = parts.count > 1 ? parts.last?.first : nil
+        return "\(first)\(second.map(String.init) ?? "")".uppercased()
+    }
+
+    init(displayName: String, phones: [MessageContactPhone], organization: String? = nil) {
+        self.displayName = String(displayName.trimmingCharacters(in: .whitespacesAndNewlines).prefix(120))
+        self.phones = Array(phones.filter(\.isValid).prefix(5))
+        let trimmedOrganization = organization?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let trimmedOrganization, !trimmedOrganization.isEmpty {
+            self.organization = String(trimmedOrganization.prefix(120))
+        } else {
+            self.organization = nil
+        }
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case displayName
+        case phones
+        case organization
+        case name
+        case phoneNumber
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let displayName = try container.decodeIfPresent(String.self, forKey: .displayName)
+            ?? container.decodeIfPresent(String.self, forKey: .name)
+            ?? ""
+        var phones = try container.decodeIfPresent([MessageContactPhone].self, forKey: .phones) ?? []
+        if phones.isEmpty, let phoneNumber = try container.decodeIfPresent(String.self, forKey: .phoneNumber) {
+            phones = [MessageContactPhone(number: phoneNumber)]
+        }
+        self.init(
+            displayName: displayName,
+            phones: phones,
+            organization: try container.decodeIfPresent(String.self, forKey: .organization)
+        )
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(displayName, forKey: .displayName)
+        try container.encode(phones, forKey: .phones)
+        try container.encodeIfPresent(organization, forKey: .organization)
+    }
+}
+
 struct Message: Codable, Equatable {
     let id: String
     let chatId: String
@@ -202,6 +293,7 @@ struct Message: Codable, Equatable {
     let isDeletedForEveryone: Bool
     let isDeletedForMe: Bool
     var location: MessageLocation? = nil
+    var contact: MessageContact? = nil
 
     static func pending(
         chatId: String,
@@ -212,7 +304,8 @@ struct Message: Codable, Equatable {
         attachments: [MessageAttachment],
         replyToMessageId: String?,
         createdAt: String,
-        location: MessageLocation? = nil
+        location: MessageLocation? = nil,
+        contact: MessageContact? = nil
     ) -> Message {
         Message(
             id: "local-\(clientSendId)",
@@ -233,7 +326,8 @@ struct Message: Codable, Equatable {
             updatedAt: createdAt,
             isDeletedForEveryone: false,
             isDeletedForMe: false,
-            location: location
+            location: location,
+            contact: contact
         )
     }
 
@@ -270,6 +364,8 @@ struct Message: Codable, Equatable {
             return "Voice message"
         case .location:
             return location?.isValid == true ? "Shared location" : "Unsupported location"
+        case .contact:
+            return contact?.isValid == true ? contact?.displayName ?? "Shared contact" : "Unsupported contact"
         default:
             return type.rawValue.capitalized
         }
@@ -288,6 +384,7 @@ struct CreateMessageRequest: Encodable {
     let attachments: [MessageAttachment]?
     let replyToMessageId: String?
     let location: MessageLocation?
+    let contact: MessageContact?
 
     init(
         type: MessageType,
@@ -295,7 +392,8 @@ struct CreateMessageRequest: Encodable {
         attachments: [MessageAttachment]?,
         replyToMessageId: String? = nil,
         clientSendId: String? = nil,
-        location: MessageLocation? = nil
+        location: MessageLocation? = nil,
+        contact: MessageContact? = nil
     ) {
         self.clientSendId = clientSendId
         self.type = type
@@ -303,6 +401,7 @@ struct CreateMessageRequest: Encodable {
         self.attachments = attachments
         self.replyToMessageId = replyToMessageId
         self.location = location
+        self.contact = contact
     }
 }
 
