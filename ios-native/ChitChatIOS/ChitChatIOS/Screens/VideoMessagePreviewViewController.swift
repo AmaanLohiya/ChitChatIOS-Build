@@ -100,11 +100,11 @@ final class VideoMessagePreviewViewController: UIViewController {
         titleLabel.numberOfLines = 1
         header.addSubview(titleLabel)
 
-        playerViewController.translatesAutoresizingMaskIntoConstraints = false
         playerViewController.player = player
         playerViewController.showsPlaybackControls = true
         playerViewController.videoGravity = .resizeAspect
         addChild(playerViewController)
+        playerViewController.view.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(playerViewController.view)
         playerViewController.didMove(toParent: self)
 
