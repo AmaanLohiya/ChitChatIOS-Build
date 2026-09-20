@@ -273,6 +273,104 @@ struct MessageContact: Codable, Equatable {
     }
 }
 
+struct MessageSticker: Codable, Equatable {
+    let packId: String
+    let stickerId: String
+
+    init(packId: String, stickerId: String) {
+        self.packId = packId
+        self.stickerId = stickerId
+    }
+
+    enum CodingKeys: String, CodingKey { case packId, stickerId }
+
+    init(from decoder: Decoder) throws {
+        let values = try? decoder.container(keyedBy: CodingKeys.self)
+        packId = (try? values?.decode(String.self, forKey: .packId)) ?? ""
+        stickerId = (try? values?.decode(String.self, forKey: .stickerId)) ?? ""
+    }
+
+    var isValid: Bool {
+        packId == ChitChatStickerCatalog.packId && ChitChatStickerCatalog.sticker(id: stickerId) != nil
+    }
+}
+
+struct MessageGif: Codable, Equatable {
+    let provider: String
+    let providerId: String
+    let mediaUrl: String
+    let previewUrl: String
+    let width: Int
+    let height: Int
+
+    var isValid: Bool {
+        provider == "giphy"
+            && !providerId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && Self.isAllowedURL(mediaUrl)
+            && Self.isAllowedURL(previewUrl)
+            && (1...4096).contains(width)
+            && (1...4096).contains(height)
+    }
+
+    static func isAllowedURL(_ value: String) -> Bool {
+        guard value.count <= 2048, let url = URL(string: value), url.scheme == "https",
+              url.user == nil, url.password == nil, url.port == nil || url.port == 443,
+              let host = url.host?.lowercased() else { return false }
+        return host == "media.giphy.com" || host == "i.giphy.com"
+            || host.range(of: "^media[0-9]+\\.giphy\\.com$", options: .regularExpression) != nil
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case provider
+        case providerId
+        case mediaUrl
+        case previewUrl
+        case width
+        case height
+        case id
+        case url
+        case source
+    }
+
+    init(
+        provider: String = "giphy",
+        providerId: String,
+        mediaUrl: String,
+        previewUrl: String,
+        width: Int,
+        height: Int
+    ) {
+        self.provider = provider
+        self.providerId = providerId
+        self.mediaUrl = mediaUrl
+        self.previewUrl = previewUrl
+        self.width = width
+        self.height = height
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try? decoder.container(keyedBy: CodingKeys.self)
+        provider = (try? values?.decode(String.self, forKey: .provider)) ?? "giphy"
+        providerId = (try? values?.decode(String.self, forKey: .providerId))
+            ?? (try? values?.decode(String.self, forKey: .id)) ?? ""
+        mediaUrl = (try? values?.decode(String.self, forKey: .mediaUrl))
+            ?? (try? values?.decode(String.self, forKey: .url)) ?? ""
+        previewUrl = (try? values?.decode(String.self, forKey: .previewUrl)) ?? mediaUrl
+        width = (try? values?.decode(Int.self, forKey: .width)) ?? 320
+        height = (try? values?.decode(Int.self, forKey: .height)) ?? 320
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(provider, forKey: .provider)
+        try values.encode(providerId, forKey: .providerId)
+        try values.encode(mediaUrl, forKey: .mediaUrl)
+        try values.encode(previewUrl, forKey: .previewUrl)
+        try values.encode(width, forKey: .width)
+        try values.encode(height, forKey: .height)
+    }
+}
+
 struct Message: Codable, Equatable {
     let id: String
     let chatId: String
@@ -294,6 +392,8 @@ struct Message: Codable, Equatable {
     let isDeletedForMe: Bool
     var location: MessageLocation? = nil
     var contact: MessageContact? = nil
+    var sticker: MessageSticker? = nil
+    var gif: MessageGif? = nil
 
     static func pending(
         chatId: String,
@@ -305,7 +405,9 @@ struct Message: Codable, Equatable {
         replyToMessageId: String?,
         createdAt: String,
         location: MessageLocation? = nil,
-        contact: MessageContact? = nil
+        contact: MessageContact? = nil,
+        sticker: MessageSticker? = nil,
+        gif: MessageGif? = nil
     ) -> Message {
         Message(
             id: "local-\(clientSendId)",
@@ -327,7 +429,9 @@ struct Message: Codable, Equatable {
             isDeletedForEveryone: false,
             isDeletedForMe: false,
             location: location,
-            contact: contact
+            contact: contact,
+            sticker: sticker,
+            gif: gif
         )
     }
 
@@ -366,6 +470,10 @@ struct Message: Codable, Equatable {
             return location?.isValid == true ? "Shared location" : "Unsupported location"
         case .contact:
             return contact?.isValid == true ? contact?.displayName ?? "Shared contact" : "Unsupported contact"
+        case .sticker:
+            return sticker?.isValid == true ? ChitChatStickerCatalog.sticker(id: sticker?.stickerId)?.name ?? "Sticker" : "Unsupported sticker"
+        case .gif:
+            return gif?.isValid == true ? "GIF" : "Unsupported GIF"
         default:
             return type.rawValue.capitalized
         }
@@ -385,6 +493,8 @@ struct CreateMessageRequest: Encodable {
     let replyToMessageId: String?
     let location: MessageLocation?
     let contact: MessageContact?
+    let sticker: MessageSticker?
+    let gif: MessageGif?
 
     init(
         type: MessageType,
@@ -393,7 +503,9 @@ struct CreateMessageRequest: Encodable {
         replyToMessageId: String? = nil,
         clientSendId: String? = nil,
         location: MessageLocation? = nil,
-        contact: MessageContact? = nil
+        contact: MessageContact? = nil,
+        sticker: MessageSticker? = nil,
+        gif: MessageGif? = nil
     ) {
         self.clientSendId = clientSendId
         self.type = type
@@ -402,6 +514,8 @@ struct CreateMessageRequest: Encodable {
         self.replyToMessageId = replyToMessageId
         self.location = location
         self.contact = contact
+        self.sticker = sticker
+        self.gif = gif
     }
 }
 

@@ -228,7 +228,9 @@ final class MessageBubbleCell: UITableViewCell {
     private let replySenderLabel = UILabel()
     private let replySummaryLabel = UILabel()
     private let messageLabel = UILabel()
-    private let mediaImageView = UIImageView()
+    private let mediaImageView = AnimatedGIFImageView()
+    private let stickerArtView = ChitChatStickerArtView()
+    private let stickerNameLabel = UILabel()
     private let videoSurfaceView = UIView()
     private let videoPlayBadge = UIView()
     private let videoPlayIcon = UIImageView()
@@ -311,6 +313,15 @@ final class MessageBubbleCell: UITableViewCell {
         mediaImageView.clipsToBounds = true
         mediaImageView.backgroundColor = ChitChatColors.chatDetailInput
         mediaImageView.isHidden = true
+
+        stickerArtView.isHidden = true
+
+        stickerNameLabel.translatesAutoresizingMaskIntoConstraints = false
+        stickerNameLabel.textColor = ChitChatColors.textMuted
+        stickerNameLabel.font = UIFont.systemFont(ofSize: 11, weight: .semibold)
+        stickerNameLabel.textAlignment = .center
+        stickerNameLabel.numberOfLines = 1
+        stickerNameLabel.isHidden = true
 
         videoSurfaceView.translatesAutoresizingMaskIntoConstraints = false
         videoSurfaceView.backgroundColor = ChitChatColors.chatDetailInput
@@ -458,6 +469,8 @@ final class MessageBubbleCell: UITableViewCell {
         bubbleView.addSubview(locationCard)
         bubbleView.addSubview(contactCard)
         bubbleView.addSubview(mediaImageView)
+        bubbleView.addSubview(stickerArtView)
+        bubbleView.addSubview(stickerNameLabel)
         bubbleView.addSubview(videoSurfaceView)
         videoSurfaceView.addSubview(videoPlayBadge)
         videoPlayBadge.addSubview(videoPlayIcon)
@@ -566,7 +579,7 @@ final class MessageBubbleCell: UITableViewCell {
         imageTask?.cancel()
         imageTask = nil
         representedImageURL = nil
-        mediaImageView.image = nil
+        mediaImageView.cancelLoad()
         leadingConstraint?.isActive = false
         trailingConstraint?.isActive = false
         incomingTimeTrailing?.isActive = false
@@ -649,6 +662,10 @@ final class MessageBubbleCell: UITableViewCell {
             configureLocation(message, isOutgoing: isOutgoing)
         } else if message.type == .contact {
             configureContact(message, isOutgoing: isOutgoing)
+        } else if message.type == .sticker {
+            configureSticker(message, isOutgoing: isOutgoing)
+        } else if message.type == .gif {
+            configureGif(message, isOutgoing: isOutgoing)
         } else if (message.type == .voice || message.type == .audio),
                   let attachment = message.primaryAttachment {
             configureVoice(
@@ -943,6 +960,73 @@ final class MessageBubbleCell: UITableViewCell {
         NSLayoutConstraint.activate(activeLayoutConstraints)
     }
 
+    private func configureSticker(_ message: Message, isOutgoing: Bool) {
+        guard message.sticker?.isValid == true else {
+            configureText(message, isOutgoing: isOutgoing)
+            return
+        }
+        stickerArtView.isHidden = false
+        stickerNameLabel.isHidden = false
+        bubbleView.configure(isOutgoing: isOutgoing, radius: 20)
+        let sticker = ChitChatStickerCatalog.sticker(id: message.sticker?.stickerId)
+        stickerArtView.configure(sticker)
+        stickerNameLabel.text = sticker?.name ?? "Sticker"
+
+        activeLayoutConstraints = [
+            bubbleView.widthAnchor.constraint(greaterThanOrEqualToConstant: 126),
+
+            contentTopConstraint(for: stickerArtView, defaultConstant: 10),
+            stickerArtView.centerXAnchor.constraint(equalTo: bubbleView.centerXAnchor),
+            stickerArtView.widthAnchor.constraint(equalToConstant: 92),
+            stickerArtView.heightAnchor.constraint(equalTo: stickerArtView.widthAnchor),
+
+            stickerNameLabel.topAnchor.constraint(equalTo: stickerArtView.bottomAnchor, constant: 4),
+            stickerNameLabel.leadingAnchor.constraint(equalTo: bubbleView.leadingAnchor, constant: 10),
+            stickerNameLabel.trailingAnchor.constraint(equalTo: bubbleView.trailingAnchor, constant: -10),
+            stickerNameLabel.heightAnchor.constraint(equalToConstant: 15),
+
+            timeLabel.topAnchor.constraint(equalTo: stickerNameLabel.bottomAnchor, constant: 3),
+            timeLabel.leadingAnchor.constraint(
+                greaterThanOrEqualTo: bubbleView.leadingAnchor,
+                constant: ChitChatSpacing.chatDetailBubbleHorizontal
+            ),
+            timeLabel.heightAnchor.constraint(equalToConstant: 13),
+            timeLabel.bottomAnchor.constraint(equalTo: bubbleView.bottomAnchor, constant: -9),
+            readView.centerYAnchor.constraint(equalTo: timeLabel.centerYAnchor)
+        ]
+        NSLayoutConstraint.activate(activeLayoutConstraints)
+    }
+
+    private func configureGif(_ message: Message, isOutgoing: Bool) {
+        guard let gif = message.gif, gif.isValid else {
+            configureText(message, isOutgoing: isOutgoing)
+            return
+        }
+        mediaImageView.isHidden = false
+        bubbleView.configure(isOutgoing: isOutgoing)
+        mediaImageView.load(urlString: gif.previewUrl)
+
+        let width = mediaImageView.widthAnchor.constraint(equalToConstant: 268)
+        width.priority = .defaultHigh
+        let ratio = max(0.72, min(1.45, CGFloat(gif.width) / CGFloat(max(gif.height, 1))))
+        activeLayoutConstraints = [
+            contentTopConstraint(for: mediaImageView, defaultConstant: 0),
+            mediaImageView.leadingAnchor.constraint(equalTo: bubbleView.leadingAnchor),
+            mediaImageView.trailingAnchor.constraint(equalTo: bubbleView.trailingAnchor),
+            width,
+            mediaImageView.heightAnchor.constraint(equalTo: mediaImageView.widthAnchor, multiplier: 1 / ratio),
+            timeLabel.topAnchor.constraint(equalTo: mediaImageView.bottomAnchor, constant: 8),
+            timeLabel.leadingAnchor.constraint(
+                greaterThanOrEqualTo: bubbleView.leadingAnchor,
+                constant: ChitChatSpacing.chatDetailBubbleHorizontal
+            ),
+            timeLabel.heightAnchor.constraint(equalToConstant: 13),
+            timeLabel.bottomAnchor.constraint(equalTo: bubbleView.bottomAnchor, constant: -10),
+            readView.centerYAnchor.constraint(equalTo: timeLabel.centerYAnchor)
+        ]
+        NSLayoutConstraint.activate(activeLayoutConstraints)
+    }
+
     private func configureDocument(_ message: Message, attachment: MessageAttachment, isOutgoing: Bool) {
         documentIconWrap.isHidden = false
         documentNameLabel.isHidden = false
@@ -1115,6 +1199,8 @@ final class MessageBubbleCell: UITableViewCell {
             contactCard,
             messageLabel,
             mediaImageView,
+            stickerArtView,
+            stickerNameLabel,
             videoSurfaceView,
             videoDurationLabel,
             videoNameLabel,

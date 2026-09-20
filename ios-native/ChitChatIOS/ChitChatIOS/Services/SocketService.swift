@@ -340,7 +340,9 @@ final class SocketService {
         replyToMessageId: String? = nil,
         clientSendId: String? = nil,
         location: MessageLocation? = nil,
-        contact: MessageContact? = nil
+        contact: MessageContact? = nil,
+        sticker: MessageSticker? = nil,
+        gif: MessageGif? = nil
     ) async throws -> Message {
         let payload = try Self.messagePayload(
             chatId: chatId,
@@ -350,7 +352,9 @@ final class SocketService {
             replyToMessageId: replyToMessageId,
             clientSendId: clientSendId,
             location: location,
-            contact: contact
+            contact: contact,
+            sticker: sticker,
+            gif: gif
         )
 
         return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Message, Error>) in
@@ -383,7 +387,9 @@ final class SocketService {
         replyToMessageId: String?,
         clientSendId: String?,
         location: MessageLocation?,
-        contact: MessageContact?
+        contact: MessageContact?,
+        sticker: MessageSticker?,
+        gif: MessageGif?
     ) throws -> [String: Any] {
         var payload: [String: Any] = [
             "chatId": chatId,
@@ -417,6 +423,18 @@ final class SocketService {
             guard contact.isValid else { throw SocketServiceError.invalidPayload }
             let data = try JSONEncoder().encode(contact)
             payload["contact"] = try JSONSerialization.jsonObject(with: data)
+        }
+
+        if let sticker {
+            guard sticker.isValid else { throw SocketServiceError.invalidPayload }
+            let data = try JSONEncoder().encode(sticker)
+            payload["sticker"] = try JSONSerialization.jsonObject(with: data)
+        }
+
+        if let gif {
+            guard gif.isValid else { throw SocketServiceError.invalidPayload }
+            let data = try JSONEncoder().encode(gif)
+            payload["gif"] = try JSONSerialization.jsonObject(with: data)
         }
 
         return payload

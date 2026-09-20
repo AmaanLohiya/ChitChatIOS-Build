@@ -2136,7 +2136,9 @@ final class ChatDetailViewController: BaseViewController {
                     replyToMessageId: request.replyToMessageId,
                     clientSendId: request.clientSendId,
                     location: request.location,
-                    contact: request.contact
+                    contact: request.contact,
+                    sticker: request.sticker,
+                    gif: request.gif
                 )
             } catch {
                 return try await messageService.sendMessage(chatId: chat.id, request: request)
@@ -2218,6 +2220,12 @@ final class ChatDetailViewController: BaseViewController {
         sheet.addAction(UIAlertAction(title: "Contact", style: .default) { [weak self] _ in
             self?.presentContactPreview()
         })
+        sheet.addAction(UIAlertAction(title: "Sticker", style: .default) { [weak self] _ in
+            self?.presentStickerPicker()
+        })
+        sheet.addAction(UIAlertAction(title: "GIF", style: .default) { [weak self] _ in
+            self?.presentGifPicker()
+        })
         sheet.addAction(UIAlertAction(title: "Cancel", style: .cancel))
         sheet.popoverPresentationController?.sourceView = inputBar
         sheet.popoverPresentationController?.sourceRect = inputBar.bounds
@@ -2267,6 +2275,56 @@ final class ChatDetailViewController: BaseViewController {
                 clientSendId: clientSendId, type: .contact, text: contact.displayName, attachments: [],
                 replyToMessageId: self.replyToMessageID,
                 createdAt: ISO8601DateFormatter().string(from: Date()), contact: contact
+            )
+            self.enqueuePendingMessage(pending, payload: .ready(request), usesMediaTask: false)
+            self.clearComposerContextState(restoreDraft: false)
+        }
+        present(UINavigationController(rootViewController: controller), animated: true)
+    }
+
+    private func presentStickerPicker() {
+        guard sendTask == nil, mediaTask == nil, editingMessageID == nil else { return }
+        let controller = StickerPickerViewController()
+        controller.onSend = { [weak self] sticker in
+            guard let self, self.viewIfLoaded?.window != nil,
+                  SessionManager.shared.authenticatedUser?.id == self.currentUser.id,
+                  self.sendTask == nil, self.mediaTask == nil, sticker.isValid else { return }
+            let clientSendId = "ios-\(UUID().uuidString.lowercased())"
+            let request = CreateMessageRequest(
+                type: .sticker, text: nil, attachments: nil,
+                replyToMessageId: self.replyToMessageID, clientSendId: clientSendId,
+                sticker: sticker
+            )
+            let pending = Message.pending(
+                chatId: self.chat.id, senderId: self.currentUser.id,
+                clientSendId: clientSendId, type: .sticker, text: nil, attachments: [],
+                replyToMessageId: self.replyToMessageID,
+                createdAt: ISO8601DateFormatter().string(from: Date()), sticker: sticker
+            )
+            self.enqueuePendingMessage(pending, payload: .ready(request), usesMediaTask: false)
+            self.clearComposerContextState(restoreDraft: false)
+        }
+        present(UINavigationController(rootViewController: controller), animated: true)
+    }
+
+    private func presentGifPicker() {
+        guard sendTask == nil, mediaTask == nil, editingMessageID == nil else { return }
+        let controller = GifPickerViewController()
+        controller.onSend = { [weak self] gif in
+            guard let self, self.viewIfLoaded?.window != nil,
+                  SessionManager.shared.authenticatedUser?.id == self.currentUser.id,
+                  self.sendTask == nil, self.mediaTask == nil, gif.isValid else { return }
+            let clientSendId = "ios-\(UUID().uuidString.lowercased())"
+            let request = CreateMessageRequest(
+                type: .gif, text: nil, attachments: nil,
+                replyToMessageId: self.replyToMessageID, clientSendId: clientSendId,
+                gif: gif
+            )
+            let pending = Message.pending(
+                chatId: self.chat.id, senderId: self.currentUser.id,
+                clientSendId: clientSendId, type: .gif, text: nil, attachments: [],
+                replyToMessageId: self.replyToMessageID,
+                createdAt: ISO8601DateFormatter().string(from: Date()), gif: gif
             )
             self.enqueuePendingMessage(pending, payload: .ready(request), usesMediaTask: false)
             self.clearComposerContextState(restoreDraft: false)
@@ -2433,6 +2491,14 @@ final class ChatDetailViewController: BaseViewController {
             if !ContactMessageCardView.presentActions(for: message.contact, from: self) {
                 showAlert(message: "This contact card is unavailable.")
             }
+            return
+        }
+        if message.type == .gif, !message.isDeletedForEveryone {
+            guard let gif = message.gif, gif.isValid else {
+                showAlert(message: "This GIF is unavailable.")
+                return
+            }
+            present(GifMessagePreviewController(gif: gif), animated: true)
             return
         }
         guard !message.isDeletedForEveryone, let attachment = message.primaryAttachment else { return }
@@ -2971,6 +3037,10 @@ final class ChatDetailViewController: BaseViewController {
             return "Voice message"
         case .contact:
             return message.contact?.isValid == true ? message.contact?.displayName ?? "Shared contact" : "Unsupported contact"
+        case .sticker:
+            return "Sticker"
+        case .gif:
+            return "GIF"
         default:
             let displayText = message.displayText.trimmingCharacters(in: .whitespacesAndNewlines)
             return displayText.isEmpty ? "Message" : displayText
