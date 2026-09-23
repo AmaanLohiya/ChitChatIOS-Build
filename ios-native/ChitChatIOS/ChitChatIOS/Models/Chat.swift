@@ -70,6 +70,16 @@ struct Chat: Codable, Equatable {
     let createdAt: String
     let updatedAt: String
 
+    var activeMembers: [ChatParticipant] { members.filter { $0.leftAt == nil && $0.deletedAt == nil } }
+
+    func isActiveMember(_ userID: String) -> Bool {
+        activeMembers.contains { $0.userId == userID }
+    }
+
+    func canManageGroup(_ userID: String) -> Bool {
+        type == .group && activeMembers.contains { $0.userId == userID && ["owner", "admin"].contains($0.role) }
+    }
+
     func otherParticipant(viewerUserId: String) -> ChatParticipant? {
         guard type == .direct else { return nil }
         return members.first { $0.userId != viewerUserId && $0.leftAt == nil && $0.deletedAt == nil }
@@ -148,6 +158,14 @@ struct CreateGroupChatRequest: Encodable {
     let name: String
     let avatarUrl: String?
 }
+
+struct UpdateGroupRequest: Encodable {
+    var name: String? = nil
+    var avatarUploadId: String? = nil
+}
+
+struct AddGroupMembersRequest: Encodable { let participantIds: [String] }
+struct LeaveGroupResponse: Decodable { let left: Bool; let chat: Chat }
 
 private extension String {
     var nonEmpty: String? {

@@ -75,6 +75,7 @@
 		N50000000000000000000001 /* VideoMessagePreviewViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = N50000000000000000000021 /* VideoMessagePreviewViewController.swift */; };
 		O60000000000000000000001 /* ContactMessageViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = O60000000000000000000021 /* ContactMessageViewController.swift */; };
 		P70000000000000000000001 /* GifStickerMessageViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = P70000000000000000000021 /* GifStickerMessageViewController.swift */; };
+		D4A000000000000000000001 /* GroupInfoViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4A000000000000000000002 /* GroupInfoViewController.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -146,6 +147,7 @@
 		N50000000000000000000021 /* VideoMessagePreviewViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VideoMessagePreviewViewController.swift; sourceTree = "<group>"; };
 		O60000000000000000000021 /* ContactMessageViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContactMessageViewController.swift; sourceTree = "<group>"; };
 		P70000000000000000000021 /* GifStickerMessageViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GifStickerMessageViewController.swift; sourceTree = "<group>"; };
+		D4A000000000000000000002 /* GroupInfoViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GroupInfoViewController.swift; sourceTree = "<group>"; };
 		J10000000000000000000025 /* ChitChatIOS.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ChitChatIOS.entitlements; sourceTree = "<group>"; };
 		J10000000000000000000026 /* ChitChatIOS.Release.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ChitChatIOS.Release.entitlements; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -279,6 +281,7 @@
 				N50000000000000000000021 /* VideoMessagePreviewViewController.swift */,
 				O60000000000000000000021 /* ContactMessageViewController.swift */,
 				P70000000000000000000021 /* GifStickerMessageViewController.swift */,
+				D4A000000000000000000002 /* GroupInfoViewController.swift */,
 			);
 			path = Screens;
 			sourceTree = "<group>";
@@ -437,6 +440,7 @@
 				N50000000000000000000001 /* VideoMessagePreviewViewController.swift in Sources */,
 				O60000000000000000000001 /* ContactMessageViewController.swift in Sources */,
 				P70000000000000000000001 /* GifStickerMessageViewController.swift in Sources */,
+				D4A000000000000000000001 /* GroupInfoViewController.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

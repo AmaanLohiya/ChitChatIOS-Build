@@ -15,6 +15,22 @@ final class ChatService {
         try await apiClient.request("/api/v1/chats/\(id)")
     }
 
+    func getGroup(id: String) async throws -> Chat {
+        try await apiClient.request("/api/v1/chats/\(id)/group")
+    }
+
+    func updateGroup(id: String, input: UpdateGroupRequest) async throws -> Chat {
+        try await apiClient.request("/api/v1/chats/\(id)", method: .put, body: input)
+    }
+
+    func addGroupMembers(id: String, userIDs: [String]) async throws -> Chat {
+        try await apiClient.request("/api/v1/chats/\(id)/members", method: .post, body: AddGroupMembersRequest(participantIds: userIDs))
+    }
+
+    func leaveGroup(id: String) async throws -> LeaveGroupResponse {
+        try await apiClient.request("/api/v1/chats/\(id)/leave", method: .post)
+    }
+
     func createDirectChat(participantUserId: String) async throws -> Chat {
         try await apiClient.request(
             "/api/v1/chats",

@@ -1,0 +1,37 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const root = path.resolve(__dirname, '..');
+const read = file => fs.readFileSync(path.join(root, file), 'utf8');
+const screen = read('ChitChatIOS/Screens/GroupInfoViewController.swift');
+const chat = read('ChitChatIOS/Models/Chat.swift');
+const detail = read('ChitChatIOS/Screens/ChatDetailViewController.swift');
+const list = read('ChitChatIOS/Screens/ChatsViewController.swift');
+const service = read('ChitChatIOS/Services/ChatService.swift');
+for (const pattern of [/class GroupInfoViewController/, /activeMembers/, /canManageGroup/, /Edit group name/, /PHPickerConfiguration/, /GroupPhotoPreviewController/, /usage: \.group/, /5 \* 1024 \* 1024/, /avatarUploadId/, /class GroupAddMembersViewController/, /ContactService\(\).listContacts/, /excludedIDs/, /seen.insert/, /Leave this group\?/, /\.socketChatUpdated/, /ChitChatColors/, /popToRootViewController/]) assert.match(screen, pattern);
+assert.doesNotMatch(screen, /requestAlwaysAuthorization|Storyboard|fatalError|try!|as!/);
+assert.match(chat, /\["owner", "admin"\]/);
+assert.match(detail, /chat.type == \.group[\s\S]*#selector\(openGroupInfo\)/);
+assert.match(detail, /private func closeLeftGroup[\s\S]*pendingSends.removeAll/);
+assert.match(list, /!chat.isActiveMember[\s\S]*chats.removeAll/);
+for (const endpoint of ['/group', '/members', '/leave']) assert.ok(service.includes(endpoint));
+const pbx = read('ChitChatIOS.xcodeproj/project.pbxproj');
+assert.equal((pbx.match(/GroupInfoViewController.swift in Sources/g) || []).length, 2);
+assert.equal((pbx.match(/path = GroupInfoViewController.swift;/g) || []).length, 1);
+const android = path.resolve(root, '../../chat-app');
+if (fs.existsSync(android)) {
+  const ar = file => fs.readFileSync(path.join(android, file), 'utf8');
+  const ui = ar('src/screens/GroupMembershipScreen.tsx');
+  for (const pattern of [/Group Info/, /active.length/, /member.user\?\.name/, /role === 'owner' \|\| role === 'admin'/, /name.length > 80/, /pickImageWithPrompt/, /allowsEditing: true/, /uploadGroupPhoto/, /avatarUploadId: upload.id/, /onUploadProgress/, /contactUserId !== currentUser\?\.id/, /active.some/, /Leave this group\?/, /closeLeftGroup/, /useTheme/, /getThemeTokenColor/, /running.current/, /socket\?\.on\('connect'/]) assert.match(ui, pattern);
+  const creation = ar('src/screens/GroupInfoScreen.tsx');
+  assert.match(creation, /if \(chatId\) return <GroupMembershipScreen/);
+  assert.match(creation, /uploadGroupPhoto\(groupImage\)/);
+  const context = ar('src/context/AppContext.tsx');
+  assert.match(context, /hasLeft \? withoutDuplicate/);
+  assert.match(context, /rootNavigationRef.reset/);
+  assert.match(ar('src/screens/ChatDetailScreen.tsx'), /navigate\('\/group-info', \{ state: \{ chatId: id \} \}\)/);
+  const calls = ar('src/services/api/chatsApi.ts');
+  for (const endpoint of ['/group', '/members', '/leave']) assert.ok(calls.includes(endpoint));
+  console.log('Android Group Info, role-gated actions, photo preview, contact filtering and post-leave navigation static checks passed.');
+}
+console.log('Native Group Info, permissions, realtime, photo lifecycle, member selection, leave and PBX static checks passed; device acceptance required.');

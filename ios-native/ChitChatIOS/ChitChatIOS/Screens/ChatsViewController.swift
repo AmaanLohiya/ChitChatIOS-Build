@@ -381,6 +381,11 @@ final class ChatsViewController: BaseViewController {
     }
 
     private func mergeRealtimeChat(_ chat: Chat) {
+        if chat.type == .group && !chat.isActiveMember(currentUser.id) {
+            chats.removeAll { $0.id == chat.id }
+            applySearch()
+            return
+        }
         if let index = chats.firstIndex(where: { $0.id == chat.id }) {
             guard chats[index] != chat else { return }
             chats[index] = chat

@@ -667,6 +667,7 @@ final class ChatDetailViewController: BaseViewController {
 
     private let headerView = UIView()
     private let headerAvatar = ChatHeaderAvatarView()
+    private let groupNameLabel = UILabel()
     private let onlineDot = UIView()
     private let statusLabel = UILabel()
     private let tableView = UITableView(frame: .zero, style: .plain)
@@ -761,6 +762,7 @@ final class ChatDetailViewController: BaseViewController {
         navigationController?.setNavigationBarHidden(true, animated: false)
         SocketService.shared.joinChat(chat.id)
         updateHeaderStatus()
+        if chat.type == .group { refreshChatPresence() }
     }
 
     override func viewDidAppear(_ animated: Bool) {
@@ -854,7 +856,7 @@ final class ChatDetailViewController: BaseViewController {
         onlineDot.layer.borderColor = ChitChatColors.chatDetailHeader.cgColor
         onlineDot.isHidden = chat.type == .group || !(partner?.isOnline ?? false)
 
-        let nameLabel = UILabel()
+        let nameLabel = groupNameLabel
         nameLabel.translatesAutoresizingMaskIntoConstraints = false
         nameLabel.attributedText = NSAttributedString(
             string: displayName,
@@ -878,6 +880,14 @@ final class ChatDetailViewController: BaseViewController {
         userMeta.alignment = .fill
         userMeta.spacing = 0
         userMeta.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        if chat.type == .group {
+            for target in [headerAvatar as UIView, userMeta] {
+                target.isUserInteractionEnabled = true
+                target.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(openGroupInfo)))
+                target.accessibilityLabel = "Open Group Info"
+                target.accessibilityTraits.insert(.button)
+            }
+        }
 
         let videoButton = makeHeaderAction(
             symbol: "video",
@@ -1012,6 +1022,30 @@ final class ChatDetailViewController: BaseViewController {
         let partner = chat.otherParticipant(viewerUserId: currentUser.id)?.user
         statusLabel.text = typingSummary() ?? headerStatus(partner: partner)
         onlineDot.isHidden = chat.type == .group || !(partner?.isOnline ?? false)
+    }
+
+    @objc private func openGroupInfo() {
+        guard chat.type == .group, chat.isActiveMember(currentUser.id) else { return }
+        navigationController?.pushViewController(GroupInfoViewController(chat: chat, userID: currentUser.id), animated: true)
+    }
+
+    private func applyGroupUpdate(_ updated: Chat) {
+        guard updated.id == chat.id, updated.type == .group else { return }
+        chat = updated
+        guard updated.isActiveMember(currentUser.id) else { closeLeftGroup(); return }
+        groupNameLabel.text = updated.displayName(viewerUserId: currentUser.id)
+        headerAvatar.configure(name: updated.name, avatarURL: updated.avatarUrl, seed: updated.id, isGroup: true)
+        updateHeaderStatus()
+    }
+
+    private func closeLeftGroup() {
+        view.isUserInteractionEnabled = false
+        loadTask?.cancel(); olderMessagesTask?.cancel(); sendTask?.cancel(); mediaTask?.cancel(); actionTask?.cancel()
+        pendingSends.values.compactMap(\.cleanupFileURL).forEach { PickedMediaFile.removeTemporaryFile(at: $0) }
+        pendingSends.removeAll()
+        SocketService.shared.leaveChat(chat.id)
+        if presentedViewController != nil { dismiss(animated: false) }
+        navigationController?.popToRootViewController(animated: true)
     }
 
     private func typingSummary() -> String? {
@@ -1828,11 +1862,15 @@ final class ChatDetailViewController: BaseViewController {
                 await MainActor.run {
                     self.chat = refreshedChat
                     self.presenceRefreshTask = nil
+                    if refreshedChat.type == .group { self.applyGroupUpdate(refreshedChat) }
                     self.updateHeaderStatus()
                 }
             } catch {
                 await MainActor.run {
                     self.presenceRefreshTask = nil
+                    if self.chat.type == .group, case APIClientError.server(let code, _) = error, code == "CHAT_NOT_FOUND" {
+                        self.closeLeftGroup()
+                    }
                 }
             }
         }
@@ -3279,6 +3317,10 @@ final class ChatDetailViewController: BaseViewController {
 
     private func observeRealtimeMessages() {
         let center = NotificationCenter.default
+        socketObservers.append(center.addObserver(forName: .socketChatUpdated, object: nil, queue: .main) { [weak self] note in
+            guard let updated = note.object as? Chat else { return }
+            self?.applyGroupUpdate(updated)
+        })
         socketObservers.append(
             center.addObserver(forName: .socketMessageNew, object: nil, queue: .main) {
                 [weak self] notification in
