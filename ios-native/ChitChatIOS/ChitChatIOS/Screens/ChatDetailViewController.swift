@@ -2696,7 +2696,7 @@ final class ChatDetailViewController: BaseViewController {
     }
 
     private func presentMessageActions(messageID: String, anchorRect: CGRect) {
-        guard let message = message(withID: messageID), !message.isDeletedForEveryone else { return }
+        guard let message = message(withID: messageID), !message.isDeletedForEveryone, message.type != .system else { return }
         let isOwnMessage = message.senderId == currentUser.id
         let trimmedText = message.text.trimmingCharacters(in: .whitespacesAndNewlines)
         let menu = UIAlertController(title: "Message actions", message: nil, preferredStyle: .actionSheet)
@@ -3664,6 +3664,17 @@ extension ChatDetailViewController: UITableViewDataSource, UITableViewDelegate {
             return cell
         }
 
+        if let message = message(at: indexPath), message.type == .system {
+            let cell = UITableViewCell(style: .default, reuseIdentifier: nil)
+            cell.backgroundColor = .clear
+            cell.selectionStyle = .none
+            cell.textLabel?.text = message.systemEvent?.displayText ?? "Group updated"
+            cell.textLabel?.textAlignment = .center
+            cell.textLabel?.numberOfLines = 0
+            cell.textLabel?.font = .systemFont(ofSize: 12)
+            cell.textLabel?.textColor = ChitChatColors.textMuted
+            return cell
+        }
         guard let cell = tableView.dequeueReusableCell(
             withIdentifier: MessageBubbleCell.reuseIdentifier,
             for: indexPath

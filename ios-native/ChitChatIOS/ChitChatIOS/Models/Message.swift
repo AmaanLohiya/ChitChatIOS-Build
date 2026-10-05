@@ -371,6 +371,46 @@ struct MessageGif: Codable, Equatable {
     }
 }
 
+struct GroupSystemEvent: Codable, Equatable {
+    struct Person: Codable, Equatable {
+        var userId: String?
+        var displayName: String?
+        var safeName: String? {
+            guard let displayName else { return nil }
+            let clean = displayName.components(separatedBy: CharacterSet.controlCharacters.union(CharacterSet(charactersIn: "<>"))).joined().trimmingCharacters(in: .whitespacesAndNewlines)
+            return clean.isEmpty ? nil : String(clean.prefix(80))
+        }
+    }
+    var event: String?
+    var actor: Person?
+    var target: Person?
+    enum CodingKeys: String, CodingKey { case event, actor, target }
+    init(from decoder: Decoder) throws {
+        let values = try? decoder.container(keyedBy: CodingKeys.self)
+        event = try? values?.decode(String.self, forKey: .event)
+        actor = try? values?.decode(Person.self, forKey: .actor)
+        target = try? values?.decode(Person.self, forKey: .target)
+    }
+    var displayText: String {
+        guard let name = actor?.safeName else { return "Group updated" }
+        switch event {
+        case "group_member_left": return "\(name) left"
+        case "group_name_changed": return "\(name) changed the group name"
+        case "group_photo_changed": return "\(name) changed the group photo"
+        default: break
+        }
+        guard let targetName = target?.safeName else { return "Group updated" }
+        switch event {
+        case "group_member_added": return "\(name) added \(targetName)"
+        case "group_member_removed": return "\(name) removed \(targetName)"
+        case "group_admin_promoted": return "\(name) made \(targetName) an admin"
+        case "group_admin_demoted": return "\(name) removed \(targetName) as an admin"
+        case "group_owner_transferred": return "\(name) transferred ownership to \(targetName)"
+        default: return "Group updated"
+        }
+    }
+}
+
 struct Message: Codable, Equatable {
     let id: String
     let chatId: String
@@ -394,6 +434,7 @@ struct Message: Codable, Equatable {
     var contact: MessageContact? = nil
     var sticker: MessageSticker? = nil
     var gif: MessageGif? = nil
+    var systemEvent: GroupSystemEvent? = nil
 
     static func pending(
         chatId: String,

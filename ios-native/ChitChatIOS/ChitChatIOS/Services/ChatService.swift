@@ -31,6 +31,15 @@ final class ChatService {
         try await apiClient.request("/api/v1/chats/\(id)/leave", method: .post)
     }
 
+    func administerGroup(id: String, userID: String, action: String) async throws -> Chat {
+        guard ["promote", "demote", "remove", "transfer-owner", "owner-leave"].contains(action) else { throw APIClientError.invalidResponse }
+        if action == "transfer-owner" || action == "owner-leave" {
+            return try await apiClient.request("/api/v1/chats/\(id)/\(action)", method: .post, body: ["userId": userID])
+        }
+        let suffix = action == "remove" ? "" : "/\(action)"
+        return try await apiClient.request("/api/v1/chats/\(id)/members/\(userID)\(suffix)", method: action == "remove" ? .delete : .post)
+    }
+
     func createDirectChat(participantUserId: String) async throws -> Chat {
         try await apiClient.request(
             "/api/v1/chats",

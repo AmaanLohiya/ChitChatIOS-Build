@@ -122,6 +122,7 @@ final class GroupInfoViewController: UITableViewController, PHPickerViewControll
                 let member = chat.activeMembers[indexPath.row]
                 let role = ["owner", "admin", "member"].contains(member.role) ? member.role.capitalized : "Member"
                 cell.configure(name: member.user?.name ?? "ChitChat user", detail: role + (member.userId == userID ? " - You" : ""), avatar: member.user?.avatarUrl ?? "")
+                cell.accessoryType = memberActions(member).isEmpty ? .none : .disclosureIndicator
             }
             return cell
         }
@@ -138,6 +139,9 @@ final class GroupInfoViewController: UITableViewController, PHPickerViewControll
         tableView.deselectRow(at: indexPath, animated: true)
         guard !busy else { return }
         if indexPath.section == 3 { confirmLeave(); return }
+        if indexPath.section == 2, chat.activeMembers.indices.contains(indexPath.row) {
+            showMemberMenu(chat.activeMembers[indexPath.row]); return
+        }
         guard indexPath.section == 1, chat.canManageGroup(userID) else { return }
         switch indexPath.row { case 0: editName(); case 1: selectPhoto(); default: addMembers() }
     }
@@ -201,6 +205,17 @@ final class GroupInfoViewController: UITableViewController, PHPickerViewControll
         present(UINavigationController(rootViewController: controller), animated: true)
     }
     private func confirmLeave() {
+        if chat.activeMembers.first(where: { $0.userId == userID })?.role == "owner" {
+            let candidates = chat.activeMembers.filter { $0.userId != userID }
+            guard !candidates.isEmpty else { showError("You are the only active member. Empty groups cannot be archived automatically."); return }
+            let sheet = UIAlertController(title: "Choose the next owner", message: "Transfer ownership before leaving this group.", preferredStyle: .actionSheet)
+            for member in candidates {
+                sheet.addAction(UIAlertAction(title: member.user?.name ?? "ChitChat user", style: .default) { [weak self] _ in
+                    self?.confirmAdministration(member, action: "owner-leave")
+                })
+            }
+            presentSheet(sheet); return
+        }
         let alert = UIAlertController(title: "Leave this group?", message: "You will no longer receive its messages.", preferredStyle: .alert)
         alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
         alert.addAction(UIAlertAction(title: "Leave Group", style: .destructive) { [weak self] _ in
@@ -208,6 +223,63 @@ final class GroupInfoViewController: UITableViewController, PHPickerViewControll
             self.run { try await self.service.leaveGroup(id: self.chat.id).chat }
         })
         present(alert, animated: true)
+    }
+    private func memberActions(_ member: ChatParticipant) -> [String] {
+        guard member.userId != userID, member.role != "owner" else { return [] }
+        let role = chat.activeMembers.first(where: { $0.userId == userID })?.role
+        if role == "owner" { return [member.role == "admin" ? "demote" : "promote", "remove", "transfer-owner"] }
+        return role == "admin" && member.role == "member" ? ["remove"] : []
+    }
+    private func actionTitle(_ action: String) -> String {
+        switch action {
+        case "promote": return "Make admin"
+        case "demote": return "Remove as admin"
+        case "remove": return "Remove from group"
+        case "owner-leave": return "Transfer and leave"
+        default: return "Transfer ownership"
+        }
+    }
+    private func presentSheet(_ sheet: UIAlertController) {
+        guard !busy, presentedViewController == nil else { return }
+        sheet.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        sheet.popoverPresentationController?.sourceView = view
+        sheet.popoverPresentationController?.sourceRect = CGRect(x: view.bounds.midX, y: view.bounds.midY, width: 1, height: 1)
+        present(sheet, animated: true)
+    }
+    private func showMemberMenu(_ member: ChatParticipant) {
+        let actions = memberActions(member)
+        guard !actions.isEmpty else { return }
+        let sheet = UIAlertController(title: member.user?.name ?? "Member", message: "Group administration", preferredStyle: .actionSheet)
+        for action in actions {
+            sheet.addAction(UIAlertAction(title: actionTitle(action), style: action == "remove" ? .destructive : .default) { [weak self] _ in
+                self?.confirmAdministration(member, action: action)
+            })
+        }
+        presentSheet(sheet)
+    }
+    private func confirmAdministration(_ member: ChatParticipant, action: String) {
+        guard !busy else { return }
+        let name = member.user?.name ?? "this member"
+        let question: String
+        switch action {
+        case "promote": question = "Make \(name) an admin?"
+        case "demote": question = "Remove \(name) as an admin?"
+        case "remove": question = "Remove \(name) from this group?"
+        case "owner-leave": question = "Transfer ownership to \(name) and leave this group?"
+        default: question = "Transfer group ownership to \(name)? You will become an admin."
+        }
+        let alert = UIAlertController(title: question, message: "This change will be visible to the group.", preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: actionTitle(action), style: action == "remove" || action == "owner-leave" ? .destructive : .default) { [weak self] _ in
+            guard let self else { return }
+            self.run { try await self.service.administerGroup(id: self.chat.id, userID: member.userId, action: action) }
+        })
+        // Wait for the member action sheet to finish dismissing before confirmation.
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.viewIfLoaded?.window != nil else { return }
+            if let presented = self.presentedViewController { presented.dismiss(animated: true) { self.present(alert, animated: true) } }
+            else { self.present(alert, animated: true) }
+        }
     }
     private func showError(_ message: String) {
         guard presentedViewController == nil else { navigationItem.prompt = message; return }
