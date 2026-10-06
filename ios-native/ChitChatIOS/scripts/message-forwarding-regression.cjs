@@ -22,6 +22,8 @@ for (const existing of ['beginReply', 'confirmDelete', 'beginEditing', 'loadOlde
 const cell = read('Screens/MessageBubbleCell.swift');
 assert.match(cell, /forwardedLabel.text = "Forwarded"/);
 assert.match(cell, /forwardedLabel.isHidden = !message.isForwarded/);
+assert.match(cell, /forwardedLabel.text = message.isForwarded \? "Forwarded" : nil/);
+assert.match(cell, /forwardedLabel.isHidden = true\s*forwardedLabel.text = nil/);
 assert.match(cell, /bubbleTopConstraint\?\.constant = message.isForwarded \? 20 : 0/);
 assert.match(cell, /forwardedLabel.textColor = ChitChatColors.textMuted/);
 assert.match(cell, /private func resetForConfiguration\(\) \{\s*forwardedLabel.isHidden = true/);

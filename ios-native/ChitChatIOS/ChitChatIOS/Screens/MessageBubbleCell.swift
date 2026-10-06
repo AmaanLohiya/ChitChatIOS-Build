@@ -593,6 +593,7 @@ final class MessageBubbleCell: UITableViewCell {
 
     private func resetForConfiguration() {
         forwardedLabel.isHidden = true
+        forwardedLabel.text = nil
         bubbleTopConstraint?.constant = 0
         forwardedMinimumWidth?.isActive = false
         imageTask?.cancel()
@@ -641,6 +642,7 @@ final class MessageBubbleCell: UITableViewCell {
         resetForConfiguration()
         configureReplyPreview(replyPreview)
         forwardedLabel.isHidden = !message.isForwarded
+        forwardedLabel.text = message.isForwarded ? "Forwarded" : nil
         bubbleTopConstraint?.constant = message.isForwarded ? 20 : 0
         forwardedMinimumWidth?.isActive = message.isForwarded
 
