@@ -411,7 +411,48 @@ struct GroupSystemEvent: Codable, Equatable {
     }
 }
 
+// Legacy/null/malformed flags must not make an otherwise valid history page fail.
+struct ForwardedFlag: Codable, Equatable {
+    let value: Bool
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        value = (try? container.decode(Bool.self)) == true
+    }
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(value)
+    }
+}
+
 struct Message: Codable, Equatable {
+    var forwarded: ForwardedFlag? = nil
+    var isForwarded: Bool { forwarded?.value == true && !isDeletedForEveryone }
+    var canForward: Bool {
+        guard id.range(of: "^[a-fA-F0-9]{24}$", options: .regularExpression) != nil,
+              !isDeletedForEveryone, !isDeletedForMe else { return false }
+        switch type {
+        case .text: return !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && text.count <= 5000
+        case .image, .document, .voice, .audio, .video:
+            guard !attachments.isEmpty, attachments.count <= 10,
+                  attachments.allSatisfy({ $0.url.hasPrefix("https://") || $0.url.hasPrefix("/uploads/") }) else { return false }
+            if type == .voice || type == .audio || type == .video {
+                let video = type == .video
+                guard attachments.count == 1, let item = attachments.first, let size = item.size,
+                      size > 0, size <= (video ? 50 : 10) * 1024 * 1024,
+                      let duration = item.duration, duration.isFinite,
+                      duration >= (video ? 0.01 : 0.5), duration <= (video ? 120 : 600),
+                      let name = item.fileName?.lowercased(), name.hasSuffix(video ? ".mp4" : ".m4a"),
+                      let mime = item.mimeType?.lowercased() else { return false }
+                return (video ? ["video/mp4", "video/x-m4v"] : ["audio/mp4", "audio/m4a", "audio/x-m4a"]).contains(mime)
+            }
+            return true
+        case .location: return location?.isValid == true
+        case .contact: return contact?.isValid == true
+        case .gif: return gif?.isValid == true
+        case .sticker: return sticker?.isValid == true
+        case .system: return false
+        }
+    }
     let id: String
     let chatId: String
     let senderId: String

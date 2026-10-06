@@ -221,6 +221,9 @@ final class MessageBubbleCell: UITableViewCell {
     private static let reactionOrder = ["👍", "❤️", "😂", "😮", "😢", "🙏"]
 
     private let bubbleView = MessageBubbleBackgroundView()
+    private let forwardedLabel = UILabel()
+    private var bubbleTopConstraint: NSLayoutConstraint?
+    private var forwardedMinimumWidth: NSLayoutConstraint?
     private let locationCard = LocationMessageCardView()
     private let contactCard = ContactMessageCardView()
     private let replyPreviewView = UIView()
@@ -461,6 +464,20 @@ final class MessageBubbleCell: UITableViewCell {
         sendStateButton.addTarget(self, action: #selector(retryTapped), for: .touchUpInside)
 
         contentView.addSubview(bubbleView)
+        forwardedLabel.translatesAutoresizingMaskIntoConstraints = false
+        forwardedLabel.text = "Forwarded"
+        forwardedLabel.font = .systemFont(ofSize: 11)
+        forwardedLabel.textColor = ChitChatColors.textMuted
+        forwardedLabel.isHidden = true
+        contentView.addSubview(forwardedLabel)
+        let top = bubbleView.topAnchor.constraint(equalTo: contentView.topAnchor)
+        bubbleTopConstraint = top
+        forwardedMinimumWidth = bubbleView.widthAnchor.constraint(greaterThanOrEqualToConstant: 84)
+        NSLayoutConstraint.activate([top,
+            forwardedLabel.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 2),
+            forwardedLabel.leadingAnchor.constraint(equalTo: bubbleView.leadingAnchor, constant: 8),
+            forwardedLabel.trailingAnchor.constraint(lessThanOrEqualTo: bubbleView.trailingAnchor, constant: -8)
+        ])
         bubbleView.addSubview(replyPreviewView)
         replyPreviewView.addSubview(replyAccentView)
         replyPreviewView.addSubview(replySenderLabel)
@@ -508,7 +525,6 @@ final class MessageBubbleCell: UITableViewCell {
         self.bubbleBottomConstraint = bubbleBottomConstraint
 
         NSLayoutConstraint.activate([
-            bubbleView.topAnchor.constraint(equalTo: contentView.topAnchor),
             bubbleBottomConstraint,
             bubbleView.widthAnchor.constraint(lessThanOrEqualTo: contentView.widthAnchor, multiplier: 0.77),
 
@@ -576,6 +592,9 @@ final class MessageBubbleCell: UITableViewCell {
     }
 
     private func resetForConfiguration() {
+        forwardedLabel.isHidden = true
+        bubbleTopConstraint?.constant = 0
+        forwardedMinimumWidth?.isActive = false
         imageTask?.cancel()
         imageTask = nil
         representedImageURL = nil
@@ -621,6 +640,9 @@ final class MessageBubbleCell: UITableViewCell {
     ) {
         resetForConfiguration()
         configureReplyPreview(replyPreview)
+        forwardedLabel.isHidden = !message.isForwarded
+        bubbleTopConstraint?.constant = message.isForwarded ? 20 : 0
+        forwardedMinimumWidth?.isActive = message.isForwarded
 
         if isOutgoing {
             trailingConstraint = bubbleView.trailingAnchor.constraint(

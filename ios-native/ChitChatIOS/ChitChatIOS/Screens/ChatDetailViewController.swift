@@ -2701,6 +2701,17 @@ final class ChatDetailViewController: BaseViewController {
         let trimmedText = message.text.trimmingCharacters(in: .whitespacesAndNewlines)
         let menu = UIAlertController(title: "Message actions", message: nil, preferredStyle: .actionSheet)
 
+        if message.canForward {
+            menu.addAction(UIAlertAction(title: "Forward", style: .default) { [weak self] _ in
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                    guard let self, self.presentedViewController == nil,
+                          let current = self.message(withID: messageID), current.canForward else { return }
+                    let selector = ForwardMessageViewController(message: current, userID: self.currentUser.id)
+                    self.present(UINavigationController(rootViewController: selector), animated: true)
+                }
+            })
+        }
+
         menu.addAction(UIAlertAction(title: "Reply", style: .default) { [weak self] _ in
             self?.beginReply(to: messageID)
         })

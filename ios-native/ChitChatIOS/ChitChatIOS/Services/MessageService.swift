@@ -6,6 +6,16 @@ struct MarkReadResponse: Decodable {
 }
 
 final class MessageService {
+    struct ForwardResponse: Decodable {
+        struct Result: Decodable { let chatId: String; let status: String; let message: Message? }
+        let results: [Result]
+    }
+    private struct ForwardRequest: Encodable { let targetChatIds: [String]; let clientForwardId: String }
+
+    func forward(chatId: String, messageId: String, targetChatIds: [String], clientForwardId: String) async throws -> ForwardResponse {
+        try await apiClient.request("/api/v1/chats/\(chatId)/messages/\(messageId)/forward", method: .post,
+                                    body: ForwardRequest(targetChatIds: targetChatIds, clientForwardId: clientForwardId))
+    }
     private let apiClient: APIClient
 
     init(apiClient: APIClient = .shared) {
