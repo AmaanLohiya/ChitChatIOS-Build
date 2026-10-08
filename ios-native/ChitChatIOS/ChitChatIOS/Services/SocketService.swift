@@ -12,6 +12,7 @@ extension Notification.Name {
     static let socketMessageDelivered = Notification.Name("chitchat.socket.message.delivered")
     static let socketMessageRead = Notification.Name("chitchat.socket.message.read")
     static let socketChatUpdated = Notification.Name("chitchat.socket.chat.updated")
+    static let socketChatPinsUpdated = Notification.Name("chitchat.socket.chat.pinsUpdated")
     static let socketTypingStarted = Notification.Name("chitchat.socket.typing.started")
     static let socketTypingStopped = Notification.Name("chitchat.socket.typing.stopped")
     static let socketPresenceUpdated = Notification.Name("chitchat.socket.presence.updated")
@@ -489,6 +490,14 @@ final class SocketService {
         )
         registerMessageHandler("message:delivered", notification: .socketMessageDelivered, on: socket)
         registerMessageHandler("message:read", notification: .socketMessageRead, on: socket)
+
+        socket.on("chat:pins-updated") { [weak self] data, _ in
+            guard let payload = data.first as? [String: Any], let chatID = payload["chatId"] as? String,
+                  chatID.range(of: "^[a-fA-F0-9]{24}$", options: .regularExpression) != nil else { return }
+            DispatchQueue.main.async { [weak self] in
+                self?.notificationCenter.post(name: .socketChatPinsUpdated, object: chatID)
+            }
+        }
 
         socket.on("chat:updated") { [weak self] data, _ in
             guard

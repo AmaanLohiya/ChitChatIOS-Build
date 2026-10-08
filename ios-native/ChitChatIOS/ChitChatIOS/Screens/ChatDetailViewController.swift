@@ -671,6 +671,8 @@ final class ChatDetailViewController: BaseViewController {
     private let onlineDot = UIView()
     private let statusLabel = UILabel()
     private let tableView = UITableView(frame: .zero, style: .plain)
+    private lazy var pinnedMessages = PinnedMessagesCoordinator(chatID: chat.id, userID: currentUser.id)
+    private var highlightedPinID: String?
     private let scrollToBottomButton = UIButton(type: .system)
     private let olderMessagesHeader = UIView()
     private let olderMessagesSpinner = UIActivityIndicatorView(style: .medium)
@@ -751,6 +753,10 @@ final class ChatDetailViewController: BaseViewController {
         super.viewDidLoad()
         view.backgroundColor = ChitChatColors.chatDetailScreen
         configureHeader()
+        pinnedMessages.install(on: self, below: headerView)
+        pinnedMessages.openLoaded = { [weak self] message in self?.jumpToLoadedPin(message) ?? false }
+        pinnedMessages.openMedia = { [weak self] message in self?.openMediaMessage(message) }
+        pinnedMessages.statusForMessage = { [weak self] message in message.status(activeParticipantIDs: self?.activeParticipantIDs ?? []) }
         configureTable()
         configureInputBar()
         observeRealtimeMessages()
@@ -761,6 +767,7 @@ final class ChatDetailViewController: BaseViewController {
         super.viewWillAppear(animated)
         navigationController?.setNavigationBarHidden(true, animated: false)
         SocketService.shared.joinChat(chat.id)
+        pinnedMessages.reload()
         updateHeaderStatus()
         if chat.type == .group { refreshChatPresence() }
     }
@@ -1451,7 +1458,7 @@ final class ChatDetailViewController: BaseViewController {
             inputBar.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             inputBar.bottomAnchor.constraint(equalTo: view.keyboardLayoutGuide.topAnchor),
 
-            tableView.topAnchor.constraint(equalTo: headerView.bottomAnchor),
+            tableView.topAnchor.constraint(equalTo: pinnedMessages.banner.bottomAnchor),
             tableView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             tableView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             tableView.bottomAnchor.constraint(equalTo: voiceNoteComposer.topAnchor)
@@ -2701,6 +2708,16 @@ final class ChatDetailViewController: BaseViewController {
         let trimmedText = message.text.trimmingCharacters(in: .whitespacesAndNewlines)
         let menu = UIAlertController(title: "Message actions", message: nil, preferredStyle: .actionSheet)
 
+        if pinnedMessages.state.canManage, !pinnedMessages.busy, message.canForward,
+           message.clientSendId.flatMap({ pendingSends[$0] }) == nil {
+            let remove = pinnedMessages.isPinned(messageID)
+            menu.addAction(UIAlertAction(title: remove ? "Unpin" : "Pin", style: .default) { [weak self] _ in
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                    self?.pinnedMessages.change(messageID, remove: remove)
+                }
+            })
+        }
+
         if message.canForward {
             menu.addAction(UIAlertAction(title: "Forward", style: .default) { [weak self] _ in
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
@@ -2744,6 +2761,25 @@ final class ChatDetailViewController: BaseViewController {
         menu.popoverPresentationController?.sourceView = tableView
         menu.popoverPresentationController?.sourceRect = anchorRect
         present(menu, animated: true)
+    }
+
+    private func jumpToLoadedPin(_ message: Message) -> Bool {
+        guard let row = timelineRows.firstIndex(where: {
+            if case let .message(value) = $0 { return value.id == message.id }
+            return false
+        }) else { return false }
+        highlightedPinID = message.id
+        let index = IndexPath(row: row, section: 0)
+        tableView.reloadRows(at: [index], with: .none)
+        tableView.scrollToRow(at: index, at: .middle, animated: true)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.2) { [weak self] in
+            guard let self, self.highlightedPinID == message.id else { return }
+            self.highlightedPinID = nil
+            for path in self.tableView.indexPathsForVisibleRows ?? [] where self.message(at: path)?.id == message.id {
+                self.tableView.cellForRow(at: path)?.backgroundColor = .clear
+            }
+        }
+        return true
     }
 
     private func presentReactionActions(messageID: String, anchorRect: CGRect) {
@@ -3738,6 +3774,7 @@ extension ChatDetailViewController: UITableViewDataSource, UITableViewDelegate {
                 self?.voiceNotePlayback.stop()
             }
         )
+        cell.backgroundColor = highlightedPinID == message.id ? ChitChatColors.accent.withAlphaComponent(0.15) : .clear
         return cell
     }
 
