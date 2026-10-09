@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+        F5D000000000000000000001 /* ConversationSearchViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = F5D000000000000000000002 /* ConversationSearchViewController.swift */; };
         F5B000000000000000000001 /* PinnedMessagesViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = F5B000000000000000000002 /* PinnedMessagesViewController.swift */; };
         F5C000000000000000000001 /* PollMessages.swift in Sources */ = {isa = PBXBuildFile; fileRef = F5C000000000000000000002 /* PollMessages.swift */; };
         F5A000000000000000000001 /* ForwardMessageViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = F5A000000000000000000002 /* ForwardMessageViewController.swift */; };
@@ -82,6 +83,7 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+        F5D000000000000000000002 /* ConversationSearchViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationSearchViewController.swift; sourceTree = "<group>"; };
         F5B000000000000000000002 /* PinnedMessagesViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PinnedMessagesViewController.swift; sourceTree = "<group>"; };
         F5C000000000000000000002 /* PollMessages.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PollMessages.swift; sourceTree = "<group>"; };
         F5A000000000000000000002 /* ForwardMessageViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ForwardMessageViewController.swift; sourceTree = "<group>"; };
@@ -291,6 +293,7 @@
                 F5A000000000000000000002 /* ForwardMessageViewController.swift */,
                 F5B000000000000000000002 /* PinnedMessagesViewController.swift */,
                 F5C000000000000000000002 /* PollMessages.swift */,
+                F5D000000000000000000002 /* ConversationSearchViewController.swift */,
 			);
 			path = Screens;
 			sourceTree = "<group>";
@@ -453,6 +456,7 @@
                 F5A000000000000000000001 /* ForwardMessageViewController.swift in Sources */,
                 F5B000000000000000000001 /* PinnedMessagesViewController.swift in Sources */,
                 F5C000000000000000000001 /* PollMessages.swift in Sources */,
+                F5D000000000000000000001 /* ConversationSearchViewController.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

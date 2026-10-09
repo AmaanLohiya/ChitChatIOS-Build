@@ -916,6 +916,10 @@ final class ChatDetailViewController: BaseViewController {
             accessibilityLabel: "Chat options"
         )
         moreButton.transform = CGAffineTransform(rotationAngle: .pi / 2)
+        moreButton.menu = UIMenu(children: [UIAction(title: "Search", image: UIImage(systemName: "magnifyingglass")) { [weak self] _ in
+            self?.presentConversationSearch()
+        }])
+        moreButton.showsMenuAsPrimaryAction = true
 
         let actions = UIStackView(arrangedSubviews: [videoButton, phoneButton, moreButton])
         actions.translatesAutoresizingMaskIntoConstraints = false
@@ -2782,6 +2786,20 @@ final class ChatDetailViewController: BaseViewController {
         menu.popoverPresentationController?.sourceView = tableView
         menu.popoverPresentationController?.sourceRect = anchorRect
         present(menu, animated: true)
+    }
+
+    private func presentConversationSearch() {
+        guard presentedViewController == nil, SessionManager.shared.authenticatedUser?.id == currentUser.id else { return }
+        let controller = ConversationSearchViewController(chatID: chat.id, userID: currentUser.id) { [weak self] message in
+            guard let self, SessionManager.shared.authenticatedUser?.id == currentUser.id,
+                  message.chatId == chat.id, !message.isDeletedForEveryone, !message.isDeletedForMe,
+                  !deletedForMeMessageIDs.contains(message.id) else { return }
+            // Reuse authoritative upsert and pin positioning; normal history cursors are untouched.
+            mergeAuthoritativeMessage(message)
+            tableView.reloadData(); tableView.layoutIfNeeded()
+            _ = jumpToLoadedPin(message)
+        }
+        present(UINavigationController(rootViewController: controller), animated: true)
     }
 
     private func jumpToLoadedPin(_ message: Message) -> Bool {
