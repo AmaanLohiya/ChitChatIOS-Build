@@ -226,6 +226,7 @@ final class MessageBubbleCell: UITableViewCell {
     private var forwardedMinimumWidth: NSLayoutConstraint?
     private let locationCard = LocationMessageCardView()
     private let contactCard = ContactMessageCardView()
+    private let pollCard = PollMessageCardView()
     private let replyPreviewView = UIView()
     private let replyAccentView = UIView()
     private let replySenderLabel = UILabel()
@@ -485,6 +486,7 @@ final class MessageBubbleCell: UITableViewCell {
         bubbleView.addSubview(messageLabel)
         bubbleView.addSubview(locationCard)
         bubbleView.addSubview(contactCard)
+        bubbleView.addSubview(pollCard)
         bubbleView.addSubview(mediaImageView)
         bubbleView.addSubview(stickerArtView)
         bubbleView.addSubview(stickerNameLabel)
@@ -686,6 +688,8 @@ final class MessageBubbleCell: UITableViewCell {
             configureLocation(message, isOutgoing: isOutgoing)
         } else if message.type == .contact {
             configureContact(message, isOutgoing: isOutgoing)
+        } else if message.type == .poll {
+            configurePoll(message, isOutgoing: isOutgoing, viewerID: currentUserId)
         } else if message.type == .sticker {
             configureSticker(message, isOutgoing: isOutgoing)
         } else if message.type == .gif {
@@ -984,6 +988,17 @@ final class MessageBubbleCell: UITableViewCell {
         NSLayoutConstraint.activate(activeLayoutConstraints)
     }
 
+    private func configurePoll(_ message: Message, isOutgoing: Bool, viewerID: String) {
+        pollCard.configure(message, viewerID: viewerID); pollCard.isHidden = false
+        bubbleView.configure(isOutgoing: isOutgoing, radius: 20)
+        let width = bubbleView.widthAnchor.constraint(equalToConstant: 300); width.priority = .defaultHigh
+        activeLayoutConstraints = [width, contentTopConstraint(for: pollCard, defaultConstant: 0),
+            pollCard.leadingAnchor.constraint(equalTo: bubbleView.leadingAnchor), pollCard.trailingAnchor.constraint(equalTo: bubbleView.trailingAnchor),
+            timeLabel.topAnchor.constraint(equalTo: pollCard.bottomAnchor), timeLabel.heightAnchor.constraint(equalToConstant: 13),
+            timeLabel.bottomAnchor.constraint(equalTo: bubbleView.bottomAnchor, constant: -10), readView.centerYAnchor.constraint(equalTo: timeLabel.centerYAnchor)]
+        NSLayoutConstraint.activate(activeLayoutConstraints)
+    }
+
     private func configureSticker(_ message: Message, isOutgoing: Bool) {
         guard message.sticker?.isValid == true else {
             configureText(message, isOutgoing: isOutgoing)
@@ -1218,7 +1233,9 @@ final class MessageBubbleCell: UITableViewCell {
     }
 
     private func resetContentVisibility() {
+        pollCard.reset()
         [
+            pollCard,
             locationCard,
             contactCard,
             messageLabel,

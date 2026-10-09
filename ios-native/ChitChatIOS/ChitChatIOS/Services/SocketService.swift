@@ -13,6 +13,7 @@ extension Notification.Name {
     static let socketMessageRead = Notification.Name("chitchat.socket.message.read")
     static let socketChatUpdated = Notification.Name("chitchat.socket.chat.updated")
     static let socketChatPinsUpdated = Notification.Name("chitchat.socket.chat.pinsUpdated")
+    static let socketPollUpdated = Notification.Name("chitchat.socket.poll.updated")
     static let socketTypingStarted = Notification.Name("chitchat.socket.typing.started")
     static let socketTypingStopped = Notification.Name("chitchat.socket.typing.stopped")
     static let socketPresenceUpdated = Notification.Name("chitchat.socket.presence.updated")
@@ -343,7 +344,8 @@ final class SocketService {
         location: MessageLocation? = nil,
         contact: MessageContact? = nil,
         sticker: MessageSticker? = nil,
-        gif: MessageGif? = nil
+        gif: MessageGif? = nil,
+        poll: PollDraft? = nil
     ) async throws -> Message {
         let payload = try Self.messagePayload(
             chatId: chatId,
@@ -355,7 +357,8 @@ final class SocketService {
             location: location,
             contact: contact,
             sticker: sticker,
-            gif: gif
+            gif: gif,
+            poll: poll
         )
 
         return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Message, Error>) in
@@ -390,12 +393,17 @@ final class SocketService {
         location: MessageLocation?,
         contact: MessageContact?,
         sticker: MessageSticker?,
-        gif: MessageGif?
+        gif: MessageGif?,
+        poll: PollDraft?
     ) throws -> [String: Any] {
         var payload: [String: Any] = [
             "chatId": chatId,
             "type": type.rawValue
         ]
+
+        if let poll {
+            payload["poll"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(poll))
+        }
 
         if let text, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             payload["text"] = text
@@ -496,6 +504,15 @@ final class SocketService {
                   chatID.range(of: "^[a-fA-F0-9]{24}$", options: .regularExpression) != nil else { return }
             DispatchQueue.main.async { [weak self] in
                 self?.notificationCenter.post(name: .socketChatPinsUpdated, object: chatID)
+            }
+        }
+
+        socket.on("poll:updated") { [weak self] data, _ in
+            guard let payload = data.first as? [String: Any], let chatID = payload["chatId"] as? String,
+                  let messageID = payload["messageId"] as? String,
+                  [chatID, messageID].allSatisfy({ $0.range(of: "^[a-fA-F0-9]{24}$", options: .regularExpression) != nil }) else { return }
+            DispatchQueue.main.async { [weak self] in
+                self?.notificationCenter.post(name: .socketPollUpdated, object: nil, userInfo: ["chatId": chatID, "messageId": messageID])
             }
         }
 

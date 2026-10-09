@@ -11,6 +11,7 @@ enum MessageType: String, Codable {
     case contact
     case sticker
     case gif
+    case poll
     case system
 }
 
@@ -451,6 +452,7 @@ struct Message: Codable, Equatable {
         case .gif: return gif?.isValid == true
         case .sticker: return sticker?.isValid == true
         case .system: return false
+        case .poll: return false
         }
     }
     let id: String
@@ -476,6 +478,11 @@ struct Message: Codable, Equatable {
     var sticker: MessageSticker? = nil
     var gif: MessageGif? = nil
     var systemEvent: GroupSystemEvent? = nil
+    var poll: MessagePoll? = nil
+    var canPin: Bool {
+        canForward || (type == .poll && poll?.isValid == true && !isDeletedForEveryone && !isDeletedForMe &&
+            id.range(of: "^[a-fA-F0-9]{24}$", options: .regularExpression) != nil)
+    }
 
     static func pending(
         chatId: String,
@@ -489,7 +496,8 @@ struct Message: Codable, Equatable {
         location: MessageLocation? = nil,
         contact: MessageContact? = nil,
         sticker: MessageSticker? = nil,
-        gif: MessageGif? = nil
+        gif: MessageGif? = nil,
+        poll: MessagePoll? = nil
     ) -> Message {
         Message(
             id: "local-\(clientSendId)",
@@ -513,7 +521,8 @@ struct Message: Codable, Equatable {
             location: location,
             contact: contact,
             sticker: sticker,
-            gif: gif
+            gif: gif,
+            poll: poll
         )
     }
 
@@ -542,6 +551,8 @@ struct Message: Codable, Equatable {
         switch type {
         case .text:
             return text
+        case .poll:
+            return !isDeletedForMe && poll?.isValid == true ? "Poll: \(String((poll?.question ?? "").prefix(100)))" : "Poll unavailable"
         case .image:
             return text.isEmpty ? "Photo" : text
         case .document:
@@ -568,6 +579,7 @@ struct CreateTextMessageRequest: Encodable {
 }
 
 struct CreateMessageRequest: Encodable {
+    let poll: PollDraft?
     let clientSendId: String?
     let type: MessageType
     let text: String?
@@ -587,7 +599,8 @@ struct CreateMessageRequest: Encodable {
         location: MessageLocation? = nil,
         contact: MessageContact? = nil,
         sticker: MessageSticker? = nil,
-        gif: MessageGif? = nil
+        gif: MessageGif? = nil,
+        poll: PollDraft? = nil
     ) {
         self.clientSendId = clientSendId
         self.type = type
@@ -598,6 +611,7 @@ struct CreateMessageRequest: Encodable {
         self.contact = contact
         self.sticker = sticker
         self.gif = gif
+        self.poll = poll
     }
 }
 

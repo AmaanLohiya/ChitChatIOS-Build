@@ -16,7 +16,7 @@ for (const pattern of [/struct ChatPin: Decodable/, /let preview: String/, /let 
   /didBecomeActiveNotification/, /didEnterBackgroundNotification/, /removeObserver/,
   /ChitChatColors.surface/, /ChitChatColors.textPrimary/, /height\?\.constant = latest == nil \? 0 : 56/]) assert.match(ui, pattern);
 assert.doesNotMatch(ui, /fatalError|try!|as!|nextMessageCursor|listMessages\(|forwardedFrom|latitude|longitude|phoneNumber|print\(/);
-assert.match(detail, /pinnedMessages.state.canManage, !pinnedMessages.busy, message.canForward/);
+assert.match(detail, /pinnedMessages.state.canManage, !pinnedMessages.busy, message.canPin/);
 assert.match(detail, /message.clientSendId.flatMap\(\{ pendingSends\[\$0\] \}\) == nil/);
 assert.match(detail, /title: remove \? "Unpin" : "Pin"/);
 assert.match(detail, /tableView.topAnchor.constraint\(equalTo: pinnedMessages.banner.bottomAnchor\)/);

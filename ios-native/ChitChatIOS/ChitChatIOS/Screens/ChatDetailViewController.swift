@@ -2183,7 +2183,8 @@ final class ChatDetailViewController: BaseViewController {
                     location: request.location,
                     contact: request.contact,
                     sticker: request.sticker,
-                    gif: request.gif
+                    gif: request.gif,
+                    poll: request.poll
                 )
             } catch {
                 return try await messageService.sendMessage(chatId: chat.id, request: request)
@@ -2265,6 +2266,7 @@ final class ChatDetailViewController: BaseViewController {
         sheet.addAction(UIAlertAction(title: "Contact", style: .default) { [weak self] _ in
             self?.presentContactPreview()
         })
+        sheet.addAction(UIAlertAction(title: "Poll", style: .default) { [weak self] _ in self?.presentPollCreator() })
         sheet.addAction(UIAlertAction(title: "Sticker", style: .default) { [weak self] _ in
             self?.presentStickerPicker()
         })
@@ -2321,6 +2323,25 @@ final class ChatDetailViewController: BaseViewController {
                 replyToMessageId: self.replyToMessageID,
                 createdAt: ISO8601DateFormatter().string(from: Date()), contact: contact
             )
+            self.enqueuePendingMessage(pending, payload: .ready(request), usesMediaTask: false)
+            self.clearComposerContextState(restoreDraft: false)
+        }
+        present(UINavigationController(rootViewController: controller), animated: true)
+    }
+
+    private func presentPollCreator() {
+        guard sendTask == nil, mediaTask == nil, editingMessageID == nil, presentedViewController == nil else { return }
+        let controller = PollCreationViewController()
+        controller.onSend = { [weak self] poll in
+            guard let self, self.viewIfLoaded?.window != nil,
+                  SessionManager.shared.authenticatedUser?.id == self.currentUser.id,
+                  self.sendTask == nil, self.mediaTask == nil, poll.validationError == nil else { return }
+            let clientSendId = "ios-\(UUID().uuidString.lowercased())"
+            let request = CreateMessageRequest(type: .poll, text: nil, attachments: nil,
+                replyToMessageId: self.replyToMessageID, clientSendId: clientSendId, poll: poll)
+            let pending = Message.pending(chatId: self.chat.id, senderId: self.currentUser.id, clientSendId: clientSendId,
+                type: .poll, text: nil, attachments: [], replyToMessageId: self.replyToMessageID,
+                createdAt: ISO8601DateFormatter().string(from: Date()), poll: MessagePoll(draft: poll))
             self.enqueuePendingMessage(pending, payload: .ready(request), usesMediaTask: false)
             self.clearComposerContextState(restoreDraft: false)
         }
@@ -2708,7 +2729,7 @@ final class ChatDetailViewController: BaseViewController {
         let trimmedText = message.text.trimmingCharacters(in: .whitespacesAndNewlines)
         let menu = UIAlertController(title: "Message actions", message: nil, preferredStyle: .actionSheet)
 
-        if pinnedMessages.state.canManage, !pinnedMessages.busy, message.canForward,
+        if pinnedMessages.state.canManage, !pinnedMessages.busy, message.canPin,
            message.clientSendId.flatMap({ pendingSends[$0] }) == nil {
             let remove = pinnedMessages.isPinned(messageID)
             menu.addAction(UIAlertAction(title: remove ? "Unpin" : "Pin", style: .default) { [weak self] _ in
