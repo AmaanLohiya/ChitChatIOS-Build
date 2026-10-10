@@ -697,6 +697,8 @@ final class ChatDetailViewController: BaseViewController {
     private var animatedMessageIDs = Set<String>()
     private var loadTask: Task<Void, Never>?
     private var olderMessagesTask: Task<Void, Never>?
+    private var searchTargetTask: Task<Void, Never>?
+    private var pendingSearchMessageID: String?
     private var sendTask: Task<Void, Never>?
     private var mediaTask: Task<Void, Never>?
     private var documentPreviewTask: Task<Void, Never>?
@@ -734,13 +736,15 @@ final class ChatDetailViewController: BaseViewController {
         currentUser: User,
         chatService: ChatService = ChatService(),
         messageService: MessageService = MessageService(),
-        uploadService: UploadService = UploadService()
+        uploadService: UploadService = UploadService(),
+        searchMessageID: String? = nil
     ) {
         self.chat = chat
         self.currentUser = currentUser
         self.chatService = chatService
         self.messageService = messageService
         self.uploadService = uploadService
+        self.pendingSearchMessageID = searchMessageID
         super.init(nibName: nil, bundle: nil)
         hidesBottomBarWhenPushed = true
     }
@@ -775,6 +779,7 @@ final class ChatDetailViewController: BaseViewController {
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         isViewVisible = true
+        openPendingSearchTarget()
         markVisibleIncomingMessagesRead()
     }
 
@@ -795,6 +800,7 @@ final class ChatDetailViewController: BaseViewController {
         receiptTask?.cancel()
         navigationController?.setNavigationBarHidden(false, animated: false)
         if isMovingFromParent || navigationController?.isBeingDismissed == true {
+            searchTargetTask?.cancel()
             actionTask?.cancel()
             actionTask = nil
             discardVoiceNote()
@@ -804,6 +810,7 @@ final class ChatDetailViewController: BaseViewController {
 
     deinit {
         loadTask?.cancel()
+        searchTargetTask?.cancel()
         olderMessagesTask?.cancel()
         sendTask?.cancel()
         mediaTask?.cancel()
@@ -1712,6 +1719,7 @@ final class ChatDetailViewController: BaseViewController {
                     self.messages.sort(by: self.sortMessages)
                     self.updateOlderMessagesHeader(isLoading: false, showsRetry: false)
                     self.hasLoaded = true
+                    self.openPendingSearchTarget()
                     self.tableView.reloadData()
                     self.updateScrollToBottomControl()
                     self.tableView.refreshControl?.endRefreshing()
@@ -2791,15 +2799,37 @@ final class ChatDetailViewController: BaseViewController {
     private func presentConversationSearch() {
         guard presentedViewController == nil, SessionManager.shared.authenticatedUser?.id == currentUser.id else { return }
         let controller = ConversationSearchViewController(chatID: chat.id, userID: currentUser.id) { [weak self] message in
-            guard let self, SessionManager.shared.authenticatedUser?.id == currentUser.id,
-                  message.chatId == chat.id, !message.isDeletedForEveryone, !message.isDeletedForMe,
-                  !deletedForMeMessageIDs.contains(message.id) else { return }
-            // Reuse authoritative upsert and pin positioning; normal history cursors are untouched.
-            mergeAuthoritativeMessage(message)
-            tableView.reloadData(); tableView.layoutIfNeeded()
-            _ = jumpToLoadedPin(message)
+            self?.integrateSearchMessage(message)
         }
         present(UINavigationController(rootViewController: controller), animated: true)
+    }
+
+    private func integrateSearchMessage(_ message: Message) {
+        guard SessionManager.shared.authenticatedUser?.id == currentUser.id,
+              message.chatId == chat.id, !message.isDeletedForEveryone, !message.isDeletedForMe,
+              !deletedForMeMessageIDs.contains(message.id) else { return }
+        // Reuse authoritative upsert and pin positioning; normal history cursors are untouched.
+        mergeAuthoritativeMessage(message)
+        tableView.reloadData(); tableView.layoutIfNeeded()
+        _ = jumpToLoadedPin(message)
+    }
+
+    private func openPendingSearchTarget() {
+        guard hasLoaded, isViewVisible, let target = pendingSearchMessageID else { return }
+        pendingSearchMessageID = nil
+        searchTargetTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                let message = try await MessageSearchTarget.load(chatID: chat.id, messageID: target)
+                guard !Task.isCancelled, viewIfLoaded?.window != nil,
+                      SessionManager.shared.authenticatedUser?.id == currentUser.id else { return }
+                integrateSearchMessage(message)
+            } catch {
+                guard !Task.isCancelled, viewIfLoaded?.window != nil,
+                      SessionManager.shared.authenticatedUser?.id == currentUser.id else { return }
+                showAlert(message: "Message is no longer available or could not be loaded.")
+            }
+        }
     }
 
     private func jumpToLoadedPin(_ message: Message) -> Bool {

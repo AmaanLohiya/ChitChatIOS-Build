@@ -1,5 +1,14 @@
 import UIKit
 
+enum MessageSearchTarget {
+    static func load(chatID: String, messageID: String) async throws -> Message {
+        let message: Message = try await APIClient.shared.request("/api/v1/chats/\(chatID)/message-target/\(messageID)")
+        guard message.chatId == chatID, message.id == messageID,
+              !message.isDeletedForEveryone, !message.isDeletedForMe else { throw APIClientError.invalidResponse }
+        return message
+    }
+}
+
 private struct ConversationSearchResult: Decodable {
     let messageId: String
     let createdAt: String
@@ -164,7 +173,7 @@ final class ConversationSearchViewController: UITableViewController, UISearchRes
         task = Task { [weak self] in
             guard let self else { return }
             do {
-                let message: Message = try await APIClient.shared.request("\(path)/message-target/\(target)")
+                let message = try await MessageSearchTarget.load(chatID: chatID, messageID: target)
                 guard !Task.isCancelled, revision == version, currentUser else { return }
                 guard message.chatId == chatID, message.id == target, !message.isDeletedForEveryone, !message.isDeletedForMe else {
                     busy = false; results = []; render("Message is no longer available."); return
