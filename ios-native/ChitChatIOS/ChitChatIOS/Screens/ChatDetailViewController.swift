@@ -698,6 +698,7 @@ final class ChatDetailViewController: BaseViewController {
     private var loadTask: Task<Void, Never>?
     private var olderMessagesTask: Task<Void, Never>?
     private var searchTargetTask: Task<Void, Never>?
+    private var messageStarAction: MessageStarAction?
     private var pendingSearchMessageID: String?
     private var sendTask: Task<Void, Never>?
     private var mediaTask: Task<Void, Never>?
@@ -2740,6 +2741,13 @@ final class ChatDetailViewController: BaseViewController {
         let isOwnMessage = message.senderId == currentUser.id
         let trimmedText = message.text.trimmingCharacters(in: .whitespacesAndNewlines)
         let menu = UIAlertController(title: "Message actions", message: nil, preferredStyle: .actionSheet)
+        if message.canPin, message.clientSendId.flatMap({ pendingSends[$0] }) == nil {
+            messageStarAction = MessageStarAction(menu: menu, message: message, userID: currentUser.id) { [weak self] in
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                    self?.showAlert(message: "Could not update saved message. Please retry.")
+                }
+            }
+        }
 
         if pinnedMessages.state.canManage, !pinnedMessages.busy, message.canPin,
            message.clientSendId.flatMap({ pendingSends[$0] }) == nil {

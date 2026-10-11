@@ -13,6 +13,7 @@ extension Notification.Name {
     static let socketMessageRead = Notification.Name("chitchat.socket.message.read")
     static let socketChatUpdated = Notification.Name("chitchat.socket.chat.updated")
     static let socketChatPinsUpdated = Notification.Name("chitchat.socket.chat.pinsUpdated")
+    static let socketMessageStarUpdated = Notification.Name("chitchat.socket.message.starUpdated")
     static let socketPollUpdated = Notification.Name("chitchat.socket.poll.updated")
     static let socketTypingStarted = Notification.Name("chitchat.socket.typing.started")
     static let socketTypingStopped = Notification.Name("chitchat.socket.typing.stopped")
@@ -498,6 +499,15 @@ final class SocketService {
         )
         registerMessageHandler("message:delivered", notification: .socketMessageDelivered, on: socket)
         registerMessageHandler("message:read", notification: .socketMessageRead, on: socket)
+
+        socket.on("message:star-updated") { [weak self] data, _ in
+            guard let payload = data.first as? [String: Any], let messageID = payload["messageId"] as? String,
+                  let starred = payload["starred"] as? Bool,
+                  messageID.range(of: "^[a-fA-F0-9]{24}$", options: .regularExpression) != nil else { return }
+            DispatchQueue.main.async { [weak self] in
+                self?.notificationCenter.post(name: .socketMessageStarUpdated, object: nil, userInfo: ["messageId": messageID, "starred": starred])
+            }
+        }
 
         socket.on("chat:pins-updated") { [weak self] data, _ in
             guard let payload = data.first as? [String: Any], let chatID = payload["chatId"] as? String,

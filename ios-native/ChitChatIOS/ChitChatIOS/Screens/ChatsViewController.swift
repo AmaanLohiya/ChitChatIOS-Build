@@ -533,7 +533,13 @@ final class ChatsViewController: BaseViewController {
     }
 
     @objc private func openChatsMenu() {
-        // HomeMenu actions are not part of the native Phase 2 feature set.
+        guard presentedViewController == nil else { return }
+        let controller = StarredMessagesViewController(userID: currentUser.id) { [weak self] chat, messageID in
+            guard let self, SessionManager.shared.authenticatedUser?.id == currentUser.id else { return }
+            navigationController?.pushViewController(
+                ChatDetailViewController(chat: chat, currentUser: currentUser, searchMessageID: messageID), animated: true)
+        }
+        present(UINavigationController(rootViewController: controller), animated: true)
     }
 
     @objc private func headerButtonDown(_ sender: UIButton) {
