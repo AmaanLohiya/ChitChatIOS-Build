@@ -2,6 +2,7 @@ import Foundation
 import SocketIO
 
 extension Notification.Name {
+    static let socketPrivacyBlockUpdated = Notification.Name("chitchat.socket.privacy.blockUpdated")
     static let socketConnected = Notification.Name("chitchat.socket.connected")
     static let socketDisconnected = Notification.Name("chitchat.socket.disconnected")
     static let socketAuthenticationError = Notification.Name("chitchat.socket.authenticationError")
@@ -500,6 +501,13 @@ final class SocketService {
         registerMessageHandler("message:delivered", notification: .socketMessageDelivered, on: socket)
         registerMessageHandler("message:read", notification: .socketMessageRead, on: socket)
 
+        socket.on("privacy:block-updated") { [weak self] data, _ in
+            guard let payload = data.first as? [String: Any], let userID = payload["userId"] as? String,
+                  let blocked = payload["blocked"] as? Bool else { return }
+            DispatchQueue.main.async {
+                self?.notificationCenter.post(name: .socketPrivacyBlockUpdated, object: nil, userInfo: ["userId": userID, "blocked": blocked])
+            }
+        }
         socket.on("message:star-updated") { [weak self] data, _ in
             guard let payload = data.first as? [String: Any], let messageID = payload["messageId"] as? String,
                   let starred = payload["starred"] as? Bool,

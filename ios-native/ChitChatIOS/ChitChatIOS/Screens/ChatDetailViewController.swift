@@ -683,6 +683,11 @@ final class ChatDetailViewController: BaseViewController {
     private let composerContextSummary = UILabel()
     private let composerContextCloseButton = UIButton(type: .system)
     private let voiceNoteComposer = VoiceNoteComposerView()
+    private var blockPolicy: DirectBlockPolicy?
+    private weak var blockMenuButton: UIButton?
+    private weak var directVoiceButton: UIButton?
+    private weak var directVideoButton: UIButton?
+    private var communicationAllowed: Bool { chat.type == .group || blockPolicy?.allowed == true }
     private let inputBar = MessageInputBar()
     private let voiceNoteRecorder = VoiceNoteRecorder()
     private let voiceNotePlayback = VoiceNotePlaybackCoordinator()
@@ -757,6 +762,10 @@ final class ChatDetailViewController: BaseViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = ChitChatColors.chatDetailScreen
+        if chat.type == .direct, let other = chat.otherParticipant(viewerUserId: currentUser.id) {
+            blockPolicy = DirectBlockPolicy(targetID: other.userId, actorID: currentUser.id)
+            blockPolicy?.onChange = { [weak self] in self?.applyCommunicationPolicy() }
+        }
         configureHeader()
         pinnedMessages.install(on: self, below: headerView)
         pinnedMessages.openLoaded = { [weak self] message in self?.jumpToLoadedPin(message) ?? false }
@@ -764,6 +773,7 @@ final class ChatDetailViewController: BaseViewController {
         pinnedMessages.statusForMessage = { [weak self] message in message.status(activeParticipantIDs: self?.activeParticipantIDs ?? []) }
         configureTable()
         configureInputBar()
+        applyCommunicationPolicy()
         observeRealtimeMessages()
         loadMessages()
     }
@@ -780,6 +790,7 @@ final class ChatDetailViewController: BaseViewController {
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         isViewVisible = true
+        blockPolicy?.active = true
         openPendingSearchTarget()
         markVisibleIncomingMessagesRead()
     }
@@ -796,6 +807,7 @@ final class ChatDetailViewController: BaseViewController {
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
         isViewVisible = false
+        blockPolicy?.active = false
         stopLocalTyping()
         clearRemoteTypingUsers()
         receiptTask?.cancel()
@@ -924,9 +936,8 @@ final class ChatDetailViewController: BaseViewController {
             accessibilityLabel: "Chat options"
         )
         moreButton.transform = CGAffineTransform(rotationAngle: .pi / 2)
-        moreButton.menu = UIMenu(children: [UIAction(title: "Search", image: UIImage(systemName: "magnifyingglass")) { [weak self] _ in
-            self?.presentConversationSearch()
-        }])
+        blockMenuButton = moreButton; directVoiceButton = phoneButton; directVideoButton = videoButton
+        updateBlockMenu()
         moreButton.showsMenuAsPrimaryAction = true
 
         let actions = UIStackView(arrangedSubviews: [videoButton, phoneButton, moreButton])
@@ -1037,7 +1048,32 @@ final class ChatDetailViewController: BaseViewController {
         return formattedLastSeen(lastSeenAt)
     }
 
+    private func updateBlockMenu() {
+        var actions = [UIAction(title: "Search", image: UIImage(systemName: "magnifyingglass")) { [weak self] _ in self?.presentConversationSearch() }]
+        if let policy = blockPolicy {
+            let label = policy.busy ? "Updating privacy..." : policy.state == nil ? "Check availability" : policy.state?.blockedByMe == true ? "Unblock user" : "Block user"
+            actions.append(UIAction(title: label, image: UIImage(systemName: "hand.raised"), attributes: policy.busy ? .disabled : []) { [weak self] _ in
+                guard let self else { return }
+                policy.confirm(on: self, name: chat.displayName(viewerUserId: currentUser.id))
+            })
+        }
+        blockMenuButton?.menu = UIMenu(children: actions)
+    }
+
+    private func applyCommunicationPolicy() {
+        guard isViewLoaded else { return }
+        inputBar.isUserInteractionEnabled = communicationAllowed
+        inputBar.alpha = communicationAllowed ? 1 : 0.45
+        directVoiceButton?.isEnabled = communicationAllowed; directVideoButton?.isEnabled = communicationAllowed
+        if !communicationAllowed { resetLocalTypingState(); clearRemoteTypingUsers() }
+        updateBlockMenu(); updateHeaderStatus()
+    }
+
     private func updateHeaderStatus() {
+        if !communicationAllowed {
+            statusLabel.text = blockPolicy?.state?.blockedByMe == true ? "You blocked this user." : "Messaging unavailable"
+            onlineDot.isHidden = true; return
+        }
         let partner = chat.otherParticipant(viewerUserId: currentUser.id)?.user
         statusLabel.text = typingSummary() ?? headerStatus(partner: partner)
         onlineDot.isHidden = chat.type == .group || !(partner?.isOnline ?? false)
@@ -1760,6 +1796,7 @@ final class ChatDetailViewController: BaseViewController {
     }
 
     private func handleInputTextChanged(_ text: String) {
+        guard communicationAllowed else { resetLocalTypingState(); return }
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             stopLocalTyping()
             return
@@ -1794,7 +1831,7 @@ final class ChatDetailViewController: BaseViewController {
     }
 
     private func stopLocalTyping(emit: Bool = true) {
-        let shouldEmit = emit && isLocalTyping && SocketService.shared.isChatJoined(chat.id)
+        let shouldEmit = emit && communicationAllowed && isLocalTyping && SocketService.shared.isChatJoined(chat.id)
         resetLocalTypingState()
         if shouldEmit {
             SocketService.shared.stopTyping(in: chat.id)
@@ -1809,6 +1846,7 @@ final class ChatDetailViewController: BaseViewController {
     }
 
     private func handleRemoteTypingStarted(_ event: SocketTypingEvent) {
+        guard communicationAllowed else { return }
         let userID = normalizedUserID(event.userId)
         guard
             normalizedUserID(event.chatId) == normalizedUserID(chat.id),
@@ -2003,6 +2041,7 @@ final class ChatDetailViewController: BaseViewController {
     }
 
     private func performPendingSend(clientSendId: String) async throws -> Message {
+        guard communicationAllowed else { throw APIClientError.server(code: "COMMUNICATION_UNAVAILABLE", message: "Message can't be sent.") }
         guard let pending = pendingSends[clientSendId] else {
             throw MediaSendError.sendFailed
         }
@@ -3728,6 +3767,7 @@ final class ChatDetailViewController: BaseViewController {
     }
 
     @objc private func startVoiceCall() {
+        guard communicationAllowed else { showAlert(message: "Call unavailable"); return }
         guard !voiceNoteRecorder.isRecording, voiceNoteDraft == nil else {
             showAlert(message: "Discard or send the voice note before starting a call.")
             return
@@ -3749,6 +3789,7 @@ final class ChatDetailViewController: BaseViewController {
     }
 
     @objc private func startVideoCall() {
+        guard communicationAllowed else { showAlert(message: "Call unavailable"); return }
         guard !voiceNoteRecorder.isRecording, voiceNoteDraft == nil else {
             showAlert(message: "Discard or send the voice note before starting a call.")
             return

@@ -56,6 +56,11 @@ final class SettingsViewController: BaseViewController {
         refreshProfileCard()
     }
 
+    @objc private func openPrivacy() {
+        guard presentedViewController == nil else { return }
+        present(UINavigationController(rootViewController: BlockingPrivacyViewController(actorID: user.id)), animated: true)
+    }
+
     private func buildUI() {
         let header = UIView()
         header.translatesAutoresizingMaskIntoConstraints = false
@@ -92,6 +97,8 @@ final class SettingsViewController: BaseViewController {
         content.addArrangedSubview(makeSectionTitle("NOTIFICATIONS"))
         content.addArrangedSubview(makeSliderCard())
         content.addArrangedSubview(makeSectionTitle("ACCOUNT"))
+        let privacyRow = makeRow(symbol: "lock", title: "Privacy", value: "Blocked Users")
+        privacyRow.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(openPrivacy)))
         let activeSessionsRow = makeRow(
             symbol: "laptopcomputer.and.iphone",
             title: "Active sessions",
@@ -103,7 +110,7 @@ final class SettingsViewController: BaseViewController {
         content.addArrangedSubview(makeRowsCard([
             makeRow(symbol: "person", title: "Account", value: "Privacy, security, change number"),
             activeSessionsRow,
-            makeRow(symbol: "lock", title: "Privacy", value: "Block contacts, disappearing messages"),
+            privacyRow,
             makeRow(symbol: "shield", title: "Security", value: "Two-step verification, passcode lock")
         ]))
         content.addArrangedSubview(makeSectionTitle("APP"))
